@@ -48,7 +48,7 @@ function applyPace(paused){
 function syncPace(){
   var aiai = getMode() === "aiai";
   var paused = getAiPaused();
-  var over = !getGame() || !!getGame().result;
+  var over = !getGame() || !!getGame().result || isReplaying();
   document.getElementById("paceSeg").hidden = !aiai;
   document.getElementById("bAuto").setAttribute("aria-pressed", paused ? "false" : "true");
   document.getElementById("bStep").setAttribute("aria-pressed", paused ? "true" : "false");
@@ -255,11 +255,11 @@ function start(){
   document.getElementById("mAiAi").addEventListener("click", function(){ setMode("aiai"); });
   /* AI 对弈节奏：自动连走 / 暂停逐手 */
   document.getElementById("bAuto").addEventListener("click", function(){
-    if (getMode() !== "aiai" || getGame().result) return;
+    if (getMode() !== "aiai" || getGame().result || isReplaying()) return;
     applyPace(false);
   });
   document.getElementById("bStep").addEventListener("click", function(){
-    if (getMode() !== "aiai" || getGame().result) return;
+    if (getMode() !== "aiai" || getGame().result || isReplaying()) return;
     stepAI();
   });
   document.getElementById("pFirst").addEventListener("click", function(){
