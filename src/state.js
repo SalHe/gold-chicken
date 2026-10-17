@@ -242,7 +242,7 @@ export function beginReplay(startJson, list){
     game = o.g; uidSeq = o.uid || uidSeq;
     baseSnapshot = startJson;
     undoStack = []; actions = [];
-    replay = { list: list.slice(), idx: 0 };
+    replay = { start: startJson, list: list.slice(), idx: 0 };
     sel = -1; curMoves = []; armed = -1;
     notify(true);
     return true;
@@ -253,23 +253,76 @@ function actionMatches(legal, a){
   if (a.kind === "flip") return legal.kind === "flip" && legal.i === a.i;
   return legal.kind === a.kind && legal.from === a.from && legal.to === a.to;
 }
+/* 应用一步回放，并给这一步新增的日志打上「第几手」标记，
+   供行棋记录点击跳转使用（不依赖日志下标，日志截断也不会错位）。 */
+function applyReplayAction(a, step){
+  var prev = game.log.length ? game.log[game.log.length - 1] : null;
+  if (a.kind === "flip") doFlip(a.i, game.turn);
+  else doMove(a, game.turn);
+  var from = 0;
+  if (prev){
+    var p = game.log.indexOf(prev);
+    from = p >= 0 ? p + 1 : game.log.length - 1;   /* 旧日志已被截断时只标记最新一条 */
+  }
+  for (var k = from; k < game.log.length; k++){
+    /* 非枚举属性：不会进入快照 JSON，回放前后局面比较不受影响 */
+    Object.defineProperty(game.log[k], "step", { value: step, enumerable: false, configurable: true });
+  }
+  game.turn = 1 - game.turn;
+  checkResult();
+}
 
 /* 走一步回放。返回 false 表示已播完或记录不合法（不合法时直接退出回放）。 */
 export function replayStep(){
   if (!replay || replay.idx >= replay.list.length) return false;
-  var a = replay.list[replay.idx];
+  var i = replay.idx;
+  var a = replay.list[i];
   var acts = allActions(game, game.turn), ok = false;
   for (var k = 0; k < acts.length; k++){
     if (actionMatches(acts[k], a)){ ok = true; break; }
   }
   if (!ok){ endReplay(); return false; }
   replay.idx++;
-  if (a.kind === "flip") doFlip(a.i, game.turn);
-  else doMove(a, game.turn);
-  game.turn = 1 - game.turn;
-  checkResult();
+  applyReplayAction(a, i + 1);
   sel = -1; curMoves = []; armed = -1;
   notify(false);
+  return true;
+}
+
+/* 跳到第 n 手（0 = 回放起点）。始终从起点重建，保证前进/后退结果一致。 */
+export function replayGoto(n){
+  if (!replay) return false;
+  var target = Math.max(0, Math.min(replay.list.length, n | 0));
+  var o;
+  try{ o = JSON.parse(replay.start); }catch(e){ return false; }
+  if (!o || !o.g || !o.g.board) return false;
+  game = o.g; uidSeq = o.uid || uidSeq;
+  for (var i = 0; i < target; i++){
+    var a = replay.list[i];
+    var acts = allActions(game, game.turn), ok = false;
+    for (var k = 0; k < acts.length; k++){
+      if (actionMatches(acts[k], a)){ ok = true; break; }
+    }
+    if (!ok){ endReplay(); return false; }
+    applyReplayAction(a, i + 1);
+  }
+  replay.idx = target;
+  sel = -1; curMoves = []; armed = -1;
+  notify(true);
+  return true;
+}
+
+/* 把当前回放局面变成一局可以继续下的对局。
+   回放前的对局被丢弃，悔棋/保存 Demo 都从这一刻重新开始。 */
+export function adoptReplay(){
+  if (!replay) return false;
+  for (var i = 0; i < game.log.length; i++) delete game.log[i].step;
+  replay = null;
+  savedState = null;
+  undoStack = []; actions = [];
+  baseSnapshot = snapshot();
+  sel = -1; curMoves = []; armed = -1;
+  notify(true);
   return true;
 }
 

@@ -439,6 +439,8 @@ body{
 .log div.r{border-left-color:var(--red-bg); background:var(--surface-2)}
 .log div.b{border-left-color:var(--blk-bg); background:var(--surface-2)}
 .log div.s{border-left-color:var(--gold); color:var(--muted); font-style:normal}
+.log div.seek{cursor:pointer}
+.log div.seek:hover{background:var(--gold-soft)}
 .log .k{font-weight:700}
 h2.t{
   font-family:var(--serif); font-size:12px; letter-spacing:.22em; color:var(--muted);
@@ -480,6 +482,14 @@ button.act:disabled{opacity:.45; cursor:not-allowed}
 .rp-btn:hover{background:var(--gold-soft); border-color:var(--gold)}
 .rp-btn:focus-visible{outline:2px solid var(--gold); outline-offset:2px}
 .rp-btn:disabled{opacity:.45; cursor:not-allowed}
+.rp-sep{width:1px; height:18px; background:var(--line-strong); margin:0 2px}
+.rp-select{
+  font:inherit; font-size:12px; padding:5px 8px; border-radius:999px; cursor:pointer;
+  border:1px solid var(--line-strong); background:var(--surface-2); color:var(--fg);
+}
+.rp-select:hover{background:var(--gold-soft); border-color:var(--gold)}
+.rp-select:focus-visible{outline:2px solid var(--gold); outline-offset:2px}
+.rp-select:disabled{opacity:.45; cursor:not-allowed}
 .demo-list{
   display:flex; flex-direction:column; gap:6px;
   max-height:210px; overflow-y:auto; margin-top:6px;

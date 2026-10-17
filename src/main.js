@@ -5,7 +5,7 @@ import { getDemo, saveDemo, removeDemo, newDemoId } from "./demo.js";
 import {
   setChanged, newGame, snapshot, commit, isAITurn, undo,
   getGame, getMode, getAiFirst, setAiFirst, getUndoStack, getActions, getBaseSnapshot,
-  isReplaying, getReplayInfo, beginReplay, replayStep, endReplay,
+  isReplaying, getReplayInfo, beginReplay, replayStep, replayGoto, adoptReplay, endReplay,
   setMode as setStateMode
 } from "./state.js";
 
@@ -32,10 +32,22 @@ function stopReplayTimer(){
 }
 function updateReplayButtons(){
   var on = isReplaying();
+  var info = getReplayInfo();
+  var idx = info ? info.idx : 0, total = info ? info.total : 0;
   document.getElementById("btnReplayPlay").textContent = replayTimer ? "暂停" : "播放";
   document.getElementById("btnReplayPlay").disabled = !on;
-  document.getElementById("btnReplayStep").disabled = !on;
+  document.getElementById("btnReplayStep").disabled = !on || idx >= total;
+  document.getElementById("btnReplayBack").disabled = !on || idx <= 0;
   document.getElementById("btnReplayStop").disabled = !on;
+  var over = !on || !!getGame().result;
+  document.getElementById("btnReplayResume").disabled = over;
+  document.getElementById("replayMode").disabled = over;
+}
+function seekReplay(n){
+  if (!isReplaying()) return;
+  stopReplayTimer();
+  replayGoto(n);
+  updateReplayButtons();
 }
 function startReplayTimer(){
   stopReplayTimer();
@@ -58,6 +70,7 @@ function playDemo(d){
     updateReplayButtons();
     return;
   }
+  document.getElementById("replayMode").value = getMode();
   startReplayTimer();
 }
 function exitReplay(){
@@ -148,6 +161,34 @@ function start(){
   });
 
   document.getElementById("btnReplayStop").addEventListener("click", exitReplay);
+  document.getElementById("btnReplayBack").addEventListener("click", function(){
+    var info = getReplayInfo();
+    if (!isReplaying() || !info || info.idx <= 0) return;
+    seekReplay(info.idx - 1);
+  });
+  /* 回放中点击行棋记录：跳到那一手之后的局面 */
+  document.getElementById("log").addEventListener("click", function(e){
+    if (!isReplaying()) return;
+    var t = e.target.closest ? e.target.closest("[data-step]") : null;
+    if (!t) return;
+    var n = parseInt(t.getAttribute("data-step"), 10);
+    if (!isFinite(n)) return;
+    seekReplay(n);
+  });
+  document.getElementById("btnReplayResume").addEventListener("click", function(){
+    if (!isReplaying() || getGame().result) return;
+    stopReplayTimer();
+    var m = document.getElementById("replayMode").value;
+    if (m !== "pvp" && m !== "ai" && m !== "aiai") m = "pvp";
+    var turn = getGame().turn;
+    setStateMode(m);
+    /* 人机模式：人接手当前行棋的一方，AI 执另一方 */
+    if (m === "ai") setAiFirst(turn === 1);
+    replayDemo = null;
+    if (!adoptReplay()) return;
+    syncModeButtons();
+    updateReplayButtons();
+  });
   document.getElementById("btnReplayStep").addEventListener("click", function(){
     if (!isReplaying()) return;
     stopReplayTimer();

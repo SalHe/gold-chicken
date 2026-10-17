@@ -134,6 +134,85 @@ describe("悔棋不限制次数", () => {
   });
 });
 
+describe("回放跳转与接手", () => {
+  beforeEach(() => { state.setMode("pvp"); state.setAiFirst(false); });
+  afterEach(() => { state.endReplay(); });
+
+  /* 走三步并留下每一步的快照，供回放任意跳转后比对 */
+  function setup(){
+    state.setGame(newBoard());
+    var start = state.getBaseSnapshot();
+    var snaps = [state.snapshot()];
+    var moves = [
+      { kind: "flip", i: R0 },
+      { kind: "move", from: B0, to: B1 },
+      { kind: "move", from: R0, to: R1 }
+    ];
+    moves.forEach(a => { state.commit(a); snaps.push(state.snapshot()); });
+    return { start: start, acts: state.getActions().slice(), snaps: snaps };
+  }
+
+  it("可以向前、向后跳到任意一手", () => {
+    var o = setup();
+    expect(state.beginReplay(o.start, o.acts)).toBe(true);
+
+    while (state.replayStep());
+    expect(state.getReplayInfo().idx).toBe(3);
+
+    expect(state.replayGoto(1)).toBe(true);
+    expect(state.getReplayInfo().idx).toBe(1);
+    expect(state.getGame()).toEqual(JSON.parse(o.snaps[1]).g);
+
+    expect(state.replayGoto(0)).toBe(true);
+    expect(state.getGame()).toEqual(JSON.parse(o.snaps[0]).g);
+
+    expect(state.replayGoto(99)).toBe(true);   /* 超出范围时夹到末手 */
+    expect(state.getReplayInfo().idx).toBe(3);
+    expect(state.getGame()).toEqual(JSON.parse(o.snaps[3]).g);
+  });
+
+  it("行棋记录带手数标记，可在跳转后重建", () => {
+    var o = setup();
+    expect(state.beginReplay(o.start, o.acts)).toBe(true);
+
+    expect(state.replayStep()).toBe(true);
+    var log = state.getGame().log;
+    expect(log.length).toBe(1);
+    expect(log[0].step).toBe(1);
+
+    /* 跳回起点日志随之清空，再跳回来又能重建 */
+    expect(state.replayGoto(0)).toBe(true);
+    expect(state.getGame().log.length).toBe(0);
+    expect(state.replayGoto(2)).toBe(true);
+    expect(state.getGame().log.map(l => l.step)).toEqual([1, 2]);
+
+    /* step 不写入快照，回放前后局面仍可逐字节比较 */
+    expect(state.snapshot()).not.toContain('"step"');
+  });
+
+  it("可以把当前回放局面变成一局可继续的对局", () => {
+    var o = setup();
+    expect(state.beginReplay(o.start, o.acts)).toBe(true);
+    expect(state.replayStep()).toBe(true);
+    expect(state.replayStep()).toBe(true);     /* 停在第 2 手，轮到红方 */
+
+    expect(state.adoptReplay()).toBe(true);
+    expect(state.isReplaying()).toBe(false);
+    expect(state.endReplay()).toBe(false);     /* 回放前的对局已被丢弃 */
+    expect(state.getActions()).toEqual([]);
+    expect(state.getUndoStack().length).toBe(0);
+    expect(state.getBaseSnapshot()).toBe(state.snapshot());
+    expect(state.getGame().turn).toBe(0);
+
+    /* 从这里接着下：悔棋/保存 Demo 都以接手时刻为起点 */
+    state.commit({ kind: "move", from: R0, to: R1 });
+    expect(state.getActions().length).toBe(1);
+    expect(state.getUndoStack().length).toBe(1);
+    expect(state.undo(1)).toBe(true);
+    expect(state.getGame()).toEqual(JSON.parse(o.snaps[2]).g);
+  });
+});
+
 describe("Demo 存储", () => {
   var saved;
   beforeEach(() => { saved = globalThis.localStorage; });

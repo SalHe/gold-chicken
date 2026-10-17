@@ -44,6 +44,7 @@ export function buildGrid(){
 export function clearPieceCache(){
   cache.forEach(function(el){ el.remove(); });
   cache.clear();
+  if (pieceEl) pieceEl.innerHTML = "";   /* 连同正在淡出的旧棋子一起清掉 */
 }
 export function makePieceEl(p){
   var el = document.createElement("div");
@@ -236,7 +237,7 @@ export function renderPanel(){
 
   var hint = document.getElementById("hint");
   if (isReplaying()){
-    hint.textContent = "回放中 · 棋盘只读，用下方按钮控制播放";
+    hint.textContent = "回放中 · 点行棋记录可跳到那一手 · 也可从当前局面接着下";
   } else if (g.result){
     hint.textContent = "本局已结束 —— 点棋盘中央的「再来一盘」开新局";
   } else if (pendingMove() && pendingMove().kind === "self"){
@@ -282,7 +283,13 @@ export function renderPanel(){
   gb.innerHTML = g.caps.b.map(function(t){ return '<span class="gv b">' + NAME[t] + "</span>"; }).join("");
 
   var lg = document.getElementById("log");
-  lg.innerHTML = g.log.map(function(l){ return '<div class="' + l.c + '">' + l.h + "</div>"; }).join("");
+  var replaying = isReplaying();
+  lg.innerHTML = g.log.map(function(l){
+    var seek = replaying && l.step;
+    var cls = l.c + (seek ? " seek" : "");
+    var attr = seek ? ' data-step="' + l.step + '" title="回到第 ' + l.step + ' 手"' : "";
+    return '<div class="' + cls + '"' + attr + ">" + l.h + "</div>";
+  }).join("");
   /* 行棋记录总是停在最新的一步 */
   lg.scrollTop = lg.scrollHeight;
 

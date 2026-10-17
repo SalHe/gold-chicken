@@ -50,9 +50,17 @@
     <div class="hint" id="hint"></div>
     <div class="replaybar" id="replayBar" hidden>
       <span class="rp-info" id="replayInfo"></span>
-      <button class="rp-btn" id="btnReplayPlay">暂停</button>
+      <button class="rp-btn" id="btnReplayBack">上一步</button>
       <button class="rp-btn" id="btnReplayStep">单步</button>
+      <button class="rp-btn" id="btnReplayPlay">暂停</button>
       <button class="rp-btn" id="btnReplayStop">退出回放</button>
+      <span class="rp-sep" aria-hidden="true"></span>
+      <select class="rp-select" id="replayMode" aria-label="从当前局面继续时的对弈模式" title="从当前局面继续时的对弈模式">
+        <option value="pvp">双人对弈</option>
+        <option value="ai">人机对弈</option>
+        <option value="aiai">AI 对弈</option>
+      </select>
+      <button class="rp-btn" id="btnReplayResume">从此局面开始</button>
     </div>
   </div>
 
