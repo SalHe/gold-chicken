@@ -30,7 +30,20 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Test
-        run: npm test
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test.log
+
+      # 测试失败时也把输出写到 job summary，方便在 Actions 页面上直接看
+      - name: Test log
+        if: always()
+        run: |
+          {
+            echo '### 测试日志（末尾 400 行）'
+            echo '```'
+            tail -n 400 test.log 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build
         run: npm run build
