@@ -246,6 +246,24 @@ describe("优势残局收束（Demo dmvbz53xwj2t1x 回归）", () => {
 });
 
 describe("暗棋公平性", () => {
+  it("有子阵亡后仍按期望值给翻棋计价，不会为躲负分而乱翻", () => {
+    /* Demo dmvcndjxxeuixx 终局：红方只有明金鸡、明象和六枚暗子，
+       黑方多子，且红金鸡正被黑麒麟盯着。唯一的好手是金鸡飞吃黑龙，
+       既救下金鸡又兑掉对方大子。旧实现把已阵亡棋子也算进暗子池，
+       池子大小对不上后翻棋只得到 1.2 分——远高于负几百的局面分，
+       AI 就会一直翻棋。 */
+    const g = mk(
+      [[0, 10, false], [1, 1, false], [8, 6, false], [11, 5, false],
+       [19, 11, false], [20, 2, false], [26, ROOSTER, true], [27, 4, true]],
+      [[2, 10, false], [3, 6, true], [4, DRAGON, true], [5, 5, true],
+       [10, 8, true], [16, 4, false], [17, 3, true], [18, 11, true],
+       [21, 7, false], [25, 2, true]],
+      { caps: { r: [9, 7, 8, 3], b: [12, 9] }, noCap: 1 }
+    );
+    const picked = ai.aiPick(g, 0);
+    expect(picked).toMatchObject({ from: 26, to: 4, kind: "capture" });
+  });
+
   it("暗棋身份不参与局面估值", () => {
     const A = xy2i(1, 1), B = xy2i(4, 7);
     const g1 = mk([[A, LEOPARD]], [[B, LEOPARD, false]]);

@@ -591,19 +591,25 @@ export function evalPos(g, col){
 
 /* ---------- 暗棋：剩余未知棋子池 ---------- */
 /* 双方各有一套 1..12 的棋子。已翻开的 (颜色, 种类) 是公开信息，
-   所以剩余暗子恰好是「尚未露面的 (颜色, 种类)」组成的多重集合，
-   每个暗格的身份在这个集合上均匀分布。测试摆局不满足整套棋子时返回 null。 */
+   已阵亡的 (颜色, 种类) 也不可能再出现在暗格里；剩下的才是暗子
+   可能的身份，每个暗格在这个集合上均匀分布。
+   测试摆局不满足整套棋子时返回 null。 */
 function hiddenPool(g){
   var seen = { r: {}, b: {} }, hidden = 0, i, p;
   for (i = 0; i < N; i++){
     p = g.board[i];
     if (!p) continue;
     if (p.rv) seen[p.c][p.t] = true; else hidden++;
+    if (p.under) seen[p.under.c][p.under.t] = true;   /* 压住的子也是明子 */
   }
   if (!hidden) return [];
   var pool = [];
   ["r", "b"].forEach(function(c){
-    for (var t = 1; t <= 12; t++) if (!seen[c][t]) pool.push({ c: c, t: t });
+    var caps = (g.caps && g.caps[c]) || [];
+    for (var t = 1; t <= 12; t++){
+      if (seen[c][t] || caps.indexOf(t) >= 0) continue;
+      pool.push({ c: c, t: t });
+    }
   });
   return pool.length === hidden ? pool : null;
 }
@@ -787,8 +793,10 @@ export function aiPick(g, pi, opts){
     for (i = 0; i < acts.length; i++){
       act = acts[i];
       if (act.kind === "flip"){
+        /* 无法重建暗子池（非标准摆局）时按「局面不变」计价。绝不能给一个
+           固定的小正数：局面估值常常是几百的负数，那会让 AI 永远翻棋。 */
         sc = pool && pool.length ? expectedFlip(g, pi, act.i, pool)
-                                 : 1.2 + Math.random() * 1.0;
+                                 : evalPos(g, col);
         sc += Math.random() * 0.3;
       } else {
         var g2 = cloneG(g);
