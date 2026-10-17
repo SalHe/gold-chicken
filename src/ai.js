@@ -53,6 +53,7 @@ const W_MY_THREAT = 0.35;
 
 /* 两个河格与各格的上下左右邻居（纯几何，模块初始化时算好） */
 const RIVER_CELLS = [id(2, 4), id(3, 4)];
+const BANK_CELLS = [id(1, 4), id(4, 4)];
 const NEI = [];
 for (var ni = 0; ni < N; ni++){
   var nc = xy(ni), arr = [];
@@ -159,6 +160,19 @@ function sameBankSide(a, b){
   var ya = xy(a).y, yb = xy(b).y;
   if (ya === 4 || yb === 4) return true;
   return (ya <= 3) === (yb <= 3);
+}
+/* 某一方是否有一手能走到 target。只算普通走子（吃子/渴死/引爆
+   都不构成占领）。exceptCell 上的子若走到 target 会空出自己的岸，
+   因此补不齐另一岸，要排除。 */
+function canStepTo(list, mvs, target, exceptCell){
+  for (var i = 0; i < list.length; i++){
+    if (list[i] === exceptCell) continue;
+    var arr = mvs[list[i]] || [];
+    for (var k = 0; k < arr.length; k++){
+      if (arr[k].to === target && arr[k].kind === "move") return true;
+    }
+  }
+  return false;
 }
 
 /* ---------- 估值 ---------- */
@@ -506,6 +520,35 @@ export function evalPos(g, col){
     s += bl === col ? bv : -bv;
   }
 
+  /* 堵岸先机：双岸能冻住河里的敌子、拦住敌方金鸡，占岸的两子还会
+     免疫攻击——谁先占住一岸，谁就握着堵岸的主动。只占一岸时另一岸
+     是空的：占岸方若能补上另一岸，堵岸几乎到手；对方若能先踏上去，
+     这次堵岸就被拆了。这里给「半堵」和「踏岸先机」计价；双方都能
+     踏岸时按争抢折价，避免把一手之争估成既成事实。 */
+  if (!ctx.bl){
+    var bankAt = {}, bankNum = { r: 0, b: 0 }, bankK;
+    for (bankK = 0; bankK < BANK_CELLS.length; bankK++){
+      var bankP = g.board[BANK_CELLS[bankK]];
+      if (bankP && bankP.rv){
+        bankAt[bankP.c] = BANK_CELLS[bankK];
+        bankNum[bankP.c]++;
+      }
+    }
+    var bankSides = [col, opp], bankLists = [mine, theirs];
+    for (bankK = 0; bankK < 2; bankK++){
+      var bankSide = bankSides[bankK];
+      if (bankNum[bankSide] !== 1 || bankNum[otherColor(bankSide)] !== 0) continue;
+      var heldBank = bankAt[bankSide];
+      var openBank = heldBank === BANK_CELLS[0] ? BANK_CELLS[1] : BANK_CELLS[0];
+      var canFill = canStepTo(bankLists[bankK], mvs, openBank, heldBank);
+      var canDeny = canStepTo(bankLists[1 - bankK], mvs, openBank, -1);
+      var bankVal = 10;                          /* 先占一岸 */
+      if (canFill) bankVal += canDeny ? 4 : 9;   /* 另一岸在望；无人争抢则先机在握 */
+      else if (canDeny) bankVal -= 4;            /* 对方随时能踏上空岸，先机不牢 */
+      s += bankSide === col ? bankVal : -bankVal;
+    }
+  }
+
   /* 敌方豹的引爆威胁：己方摆在 Y3–Y5 的子有被一波带走的风险 */
   if (ctx.bl && ctx.dive[opp]){
     var risk = 0;
@@ -659,22 +702,21 @@ function searchNode(g, pi, depth, col, alpha, beta, nodes){
   return best;
 }
 /* 根节点逐层加深；某一层超出节点预算就沿用上一层的完整结果。
-   根节点共享 alpha：第一个（上一层的）最优着法先搜，其余着法一旦
-   不可能超过当前最优就快速剪掉。 */
+   根节点每一手都开全窗口：共享 alpha 虽然省节点，却会把「不如当前
+   最优」的着法截断成与最优相同的分数，平局随机时就会选中差着。 */
 function rootSearch(g, pi, maxDepth, budget){
   var col = g.pcolor[pi];
   var acts = allActions(g, pi);
   var best = null;
   for (var d = 1; d <= maxDepth; d++){
     var nodes = { n: 0, max: budget };
-    var cur = [], complete = true, alpha = -SEARCH_INF, i, a, g2, sc;
+    var cur = [], complete = true, i, a, g2, sc;
     for (i = 0; i < acts.length; i++){
       a = acts[i];
       if (a.kind === "flip"){ complete = false; break; }
       g2 = cloneG(g);
       applyAction(g2, a);
-      sc = searchNode(g2, 1 - pi, d - 1, col, alpha, SEARCH_INF, nodes);
-      if (sc > alpha) alpha = sc;
+      sc = searchNode(g2, 1 - pi, d - 1, col, -SEARCH_INF, SEARCH_INF, nodes);
       cur.push({ a: a, sc: sc });
       if (nodes.n >= budget && i < acts.length - 1){ complete = false; break; }
     }

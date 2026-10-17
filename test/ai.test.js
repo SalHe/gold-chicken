@@ -174,6 +174,50 @@ describe("残局技术", () => {
   });
 });
 
+describe("堵岸先机", () => {
+  const BANK_L = xy2i(1, 4), BANK_R = xy2i(4, 4);
+  const farB = xy2i(4, 7);
+
+  it("先占一岸比无人占岸更有利", () => {
+    const held = mk([[BANK_L, LEOPARD]], [[farB, LEOPARD]]);
+    const open = mk([[xy2i(1, 3), LEOPARD]], [[farB, LEOPARD]]);
+    expect(ai.evalPos(held, "r")).toBeGreaterThan(ai.evalPos(open, "r") + 5);
+  });
+
+  it("另一岸在望且无人争抢时，先机价值更高", () => {
+    /* 红猫在 (4,3) 时下一步能补上 (4,4)；挪到 (3,3) 后只能斜看，补不上。 */
+    const inReach = mk([[BANK_L, LEOPARD], [xy2i(4, 3), 10]], [[farB, LEOPARD]]);
+    const outOfReach = mk([[BANK_L, LEOPARD], [xy2i(3, 3), 10]], [[farB, LEOPARD]]);
+    expect(ai.evalPos(inReach, "r")).toBeGreaterThan(ai.evalPos(outOfReach, "r") + 5);
+  });
+
+  it("对方只占一岸且能补上另一岸时，先机不牢", () => {
+    /* 黑方占 (4,4)，黑鸡可飞到 (1,4) 补岸。红豹在 (1,3) 能踩上 (1,4)
+       拦住这一手；挪到 (2,3) 就拦不住了，红方局势应更差。 */
+    const canBlock = mk([[xy2i(1, 3), LEOPARD]], [[BANK_R, LEOPARD], [farB, ROOSTER]]);
+    const cannot = mk([[xy2i(2, 3), LEOPARD]], [[BANK_R, LEOPARD], [farB, ROOSTER]]);
+    expect(ai.evalPos(canBlock, "r")).toBeGreaterThan(ai.evalPos(cannot, "r") + 3);
+  });
+
+  it("能补上另一岸时，AI 会完成堵岸", () => {
+    /* 红方还有一枚闲子（鼠），补岸后不必马上离开河岸；黑豹紧贴空岸，
+       红方若拖一手，黑豹就会先踏上空岸拆掉这次堵岸。 */
+    const g = mk(
+      [[BANK_L, LEOPARD], [xy2i(4, 3), 10], [xy2i(1, 7), RAT]],
+      [[xy2i(4, 5), LEOPARD]]
+    );
+    const picked = ai.aiPick(g, 0);
+    expect(picked).toMatchObject({ kind: "move", to: BANK_R });
+  });
+
+  it("对方即将补岸时，AI 会抢先踩上空岸拦堵", () => {
+    /* 红方另有一枚闲子，可以留在岸上持续拦堵。 */
+    const g = mk([[xy2i(1, 3), LEOPARD], [xy2i(1, 7), 10]], [[BANK_R, LEOPARD], [farB, ROOSTER]]);
+    const picked = ai.aiPick(g, 0);
+    expect(picked).toMatchObject({ kind: "move", to: BANK_L });
+  });
+});
+
 describe("优势残局收束（Demo dmvbz53xwj2t1x 回归）", () => {
   /* 这盘 Demo 在第 118 手时黑方多出龙、麒麟、狮、虎、狸、鼠，
      却因为 AI 原地兜圈，最终连续 60 手无吃子判和。现在要求：

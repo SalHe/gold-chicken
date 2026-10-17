@@ -386,7 +386,9 @@ describe("死局守卫", () => {
 });
 
 describe("对局 soak", () => {
-  it("120 局自然终局无死锁", () => {
+  /* 整局对弈是同步计算；每跑几盘让出一次事件循环，避免长时间占住
+     worker 线程导致 Vitest 的 RPC 心跳超时（表现为 unhandled error）。 */
+  it("120 局自然终局无死锁", async () => {
     let stalls = 0, games = 0, wins = 0, draws = 0, maxPly = 0;
     /* 终局由 60 手无吃子/死局/吃光保证；这里只是防止实现死循环的守卫，
        取 800 手留足余量（实测单局最长约 400 手）。 */
@@ -417,6 +419,7 @@ describe("对局 soak", () => {
       maxPly = Math.max(maxPly, ply);
       if (ply >= PLY_CAP && !state.getGame().result) stalls++;
       if (state.getGame().result && state.getGame().result.kind === "win") wins++; else draws++;
+      if (n % 5 === 4) await new Promise(r => setTimeout(r, 0));
     }
     expect(stalls).toBe(0);
     expect(draws).toBeGreaterThan(0);
