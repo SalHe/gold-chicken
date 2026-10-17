@@ -30,6 +30,7 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Test
+        id: test
         run: |
           set -o pipefail
           npm test 2>&1 | tee test.log
@@ -44,6 +45,18 @@ jobs:
             tail -n 400 test.log 2>/dev/null || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          # 再挑出关键行写成注解：注解能用公开 API 读取，
+          # 没登录 GitHub 时也能定位失败用例。
+          if [ "${{ steps.test.outcome }}" != "success" ]; then
+            grep -E "FAIL |Test Files .*failed|AssertionError|Error: |timed out" test.log 2>/dev/null \
+              | head -n 10 \
+              | while IFS= read -r line; do
+                  line=${line//'%'/'%25'}
+                  line=${line//$'\r'/'%0D'}
+                  line=${line//$'\n'/'%0A'}
+                  echo "::error title=Test failure::$line"
+                done
+          fi
 
       - name: Build
         run: npm run build

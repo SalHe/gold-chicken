@@ -290,7 +290,7 @@ function start(){
     if (!parsed.length){ importFeedback("不是有效的 Demo"); return; }
     hideImportBox();
     importText.value = "";
-    importFeedback(added ? "已导入 " + added + " 局 ✓" : "这些对局已在列表里");
+    importFeedback(added ? "已导入 " + added + " 局 ✓" : "已在列表里，或本地存储不可用");
   }
   importBtn.addEventListener("click", function(){
     var p;
