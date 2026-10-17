@@ -147,7 +147,7 @@ describe("自残/引爆点击流", () => {
 });
 
 describe("压子与行棋记录", () => {
-  it("河格压子一次点击即落子，被压的棋子缩小画在下面", () => {
+  it("河格压子一次点击即落子，被压的棋子缩成右下角徽记", () => {
     const from = xy2i(2, 3), to = xy2i(2, 4);
     state.setGame(mk([[from, DRAGON]], [[to, ELEPHANT]]));
     state.setSel(-1); state.setArmed(-1);
@@ -168,6 +168,10 @@ describe("压子与行棋记录", () => {
     const pressed = added.filter(el => el.classList.contains("pressed"));
     expect(pressed.length).toBe(1);
     expect(pressed[0].dataset.i).toBe(to);
+    /* 压在上面的棋子同时让位缩小，两枚棋子的名字都不会被挡住 */
+    const pressing = added.filter(el => el.classList.contains("pressing"));
+    expect(pressing.length).toBe(1);
+    expect(pressing[0].dataset.i).toBe(to);
   });
 
   it("行棋记录总是滚到最新的一步", () => {
