@@ -156,6 +156,22 @@ describe("残局技术", () => {
     const stacked = mk(reds, [[xy2i(1, 6), 3], [xy2i(2, 5), 5]]);
     expect(ai.evalPos(spread, "b")).toBeGreaterThan(ai.evalPos(stacked, "b") + 2);
   });
+
+  it("明显领先时，弱子被追击的顾虑更小（可以适当放弃）", () => {
+    /* 同一对局面只挪动敌方豹：贴住红鼠 = 真威胁，隔一格 = 无威胁。
+       两处豹的机动性相同、周围也没有红方猎手，分差应几乎只剩
+       「弱子被追击」这一项。领先越多，这一项的权重越小。 */
+    const atk = xy2i(2, 2), safe = xy2i(3, 2), rat = xy2i(2, 3);
+    const far = xy2i(4, 7), extra = xy2i(1, 1);
+    const lowA = mk([[far, DRAGON], [rat, RAT]], [[atk, LEOPARD]]);
+    const lowS = mk([[far, DRAGON], [rat, RAT]], [[safe, LEOPARD]]);
+    const highA = mk([[far, DRAGON], [extra, ELEPHANT], [rat, RAT]], [[atk, LEOPARD]]);
+    const highS = mk([[far, DRAGON], [extra, ELEPHANT], [rat, RAT]], [[safe, LEOPARD]]);
+    const low = ai.evalPos(lowS, "r") - ai.evalPos(lowA, "r");
+    const high = ai.evalPos(highS, "r") - ai.evalPos(highA, "r");
+    expect(low).toBeGreaterThan(1);
+    expect(high).toBeLessThan(low * 0.6);
+  });
 });
 
 describe("优势残局收束（Demo dmvbz53xwj2t1x 回归）", () => {

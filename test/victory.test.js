@@ -63,3 +63,44 @@ describe("终局告示", () => {
     expect(el("vTitle").textContent).toBe("红方胜");
   });
 });
+
+describe("结束界面查看 / 关闭", () => {
+  function winGame(){
+    state.setGame(mk([[xy2i(1, 1), 1]], [], { result: { kind: "win", winner: "r" } }));
+    ui.renderVictory();
+  }
+
+  it("按住查看只淡出牌子，松开恢复", () => {
+    winGame();
+    const v = el("victory");
+    expect(v.hidden).toBe(false);
+
+    ui.hideVictory();
+    expect(v.hidden).toBe(false);               /* 元素仍在原位接收松开事件 */
+    expect(v.classList.contains("peek")).toBe(true);
+
+    ui.restoreVictory();
+    expect(v.classList.contains("peek")).toBe(false);
+    expect(v.hidden).toBe(false);
+  });
+
+  it("关闭后保持收起；新一局的结果会重新弹出", () => {
+    winGame();
+    const v = el("victory");
+    ui.dismissVictory();
+    expect(v.hidden).toBe(true);
+    expect(ui.isVictoryDismissed()).toBe(true);
+
+    ui.render();                                 /* 同一局面重渲染仍保持关闭 */
+    expect(v.hidden).toBe(true);
+
+    ui.restoreVictory();                         /* 误触松开也不应把它弹回来 */
+    expect(v.hidden).toBe(true);
+
+    state.setGame(mk([[xy2i(1, 1), 1]], [[xy2i(4, 7), 1]],
+      { result: { kind: "draw", why: "连续 60 手无吃子" } }));
+    ui.renderVictory();
+    expect(v.hidden).toBe(false);
+    expect(ui.isVictoryDismissed()).toBe(false);
+  });
+});

@@ -48,3 +48,45 @@ export function removeDemo(id){
 export function newDemoId(){
   return "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
+
+/* 把剪贴板文本解析成 Demo：接受单个 Demo、Demo 数组，
+   也接受整份 localStorage 列表。形状不对的条目直接跳过。 */
+export function parseDemos(text){
+  var data;
+  try{ data = JSON.parse(text); }catch(e){ return []; }
+  var arr = Array.isArray(data) ? data : [data];
+  var out = [];
+  for (var i = 0; i < arr.length; i++){
+    var d = arr[i];
+    if (!d || typeof d.start !== "string" || !Array.isArray(d.actions) || !d.actions.length) continue;
+    try{
+      var o = JSON.parse(d.start);
+      if (!o || !o.g || !Array.isArray(o.g.board)) continue;
+    }catch(e){ continue; }
+    out.push(d);
+  }
+  return out;
+}
+
+function sameDemo(a, b){
+  return a.start === b.start && JSON.stringify(a.actions) === JSON.stringify(b.actions);
+}
+/* 导入 Demo：与现有记录完全相同的跳过，其余分配 id 后保存。
+   返回成功导入的局数。 */
+export function importDemos(text){
+  var incoming = parseDemos(text);
+  if (!incoming.length) return 0;
+  var added = 0;
+  for (var i = 0; i < incoming.length; i++){
+    var d = incoming[i];
+    var list = listDemos(), dup = false, j;
+    for (j = 0; j < list.length; j++) if (sameDemo(list[j], d)){ dup = true; break; }
+    if (dup) continue;
+    var id = (typeof d.id === "string" && d.id) ? d.id : "";
+    for (j = 0; id && j < list.length; j++) if (list[j].id === id){ id = ""; break; }
+    if (!id) id = newDemoId();
+    var at = (typeof d.at === "number" && isFinite(d.at)) ? d.at : Date.now();
+    if (saveDemo({ id: id, at: at, result: d.result || null, start: d.start, actions: d.actions })) added++;
+  }
+  return added;
+}

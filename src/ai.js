@@ -193,6 +193,7 @@ export function evalPos(g, col){
 
   /* 子力差在残局里权重更大：领先时乐于兑子，落后时回避兑子 */
   var s = (myMat - opMat) * (1 + 320 / (myMat + opMat + 320));
+  var lead = myMat - opMat;
 
   var ctx = { mvs: mvs, kindAt: kindAt, bl: blockadeColor(g), dive: { r: false, b: false } };
   for (i = 0; i < mine.length; i++){
@@ -238,7 +239,12 @@ export function evalPos(g, col){
   for (a = 0; a < theirs.length; a++){
     for (b = 0; b < mine.length; b++){
       gain = attackGain(g, theirs[a], mine[b], ctx);
-      if (gain > 0) s -= W_OPP_THREAT * gain;
+      if (gain <= 0) continue;
+      /* 明显领先时，为救一枚弱子而回防并不划算：损失一点子力，
+         换来强子继续压上的主动权，往往更接近「以弱换强」。 */
+      var tw = (lead > 80 && g.board[mine[b]].t !== ROOSTER &&
+                VAL[g.board[mine[b]].t] <= 22) ? 0.4 : 1;
+      s -= W_OPP_THREAT * gain * tw;
     }
   }
 
@@ -279,9 +285,44 @@ export function evalPos(g, col){
     }
   }
 
+  /* 以弱换强：明显领先时，敌方追击己方弱子不必死保。弱子本就在
+     优势方的子力账上无足轻重，回身去救反而把强子拴住；让强子
+     转头压向敌子，用弱子换对方大子，才更快绞杀干净。
+     只在「弱子正被敌子盯上」时生效，避免领先方无端弃子。 */
+  if (lead > 80 && theirs.length && mine.length){
+    var chased = 0;
+    for (i = 0; i < mine.length; i++){
+      var wp = g.board[mine[i]];
+      if (wp.t === ROOSTER || VAL[wp.t] > 22) continue;
+      for (var ca = 0; ca < theirs.length; ca++){
+        if (kindAt[theirs[ca]] && kindAt[theirs[ca]][mine[i]] === "capture"){
+          chased++;
+          break;
+        }
+      }
+    }
+    if (chased){
+      var press = 0;
+      for (i = 0; i < mine.length; i++){
+        var sp = g.board[mine[i]];
+        if (sp.t === ROOSTER || VAL[sp.t] < 30) continue;   /* 只动强子 */
+        var pd = 99;
+        for (var cj = 0; cj < theirs.length; cj++){
+          if (!canEat(sp, g.board[theirs[cj]])) continue;
+          var dd = Math.abs(xy(mine[i]).x - xy(theirs[cj]).x) +
+                   Math.abs(xy(mine[i]).y - xy(theirs[cj]).y);
+          if (dd < pd) pd = dd;
+        }
+        if (pd === 1) press += 6;
+        else if (pd === 2) press += 2;
+        else if (pd === 3) press += 0.75;
+      }
+      s += press * Math.min(lead, 300) / 300;
+    }
+  }
+
   /* 无吃子手数逼近上限：领先方必须主动收束，否则判和等于输。
      吃子会把 noCap 归零，因此这一项会自然把 AI 推向能兑现的着法。 */
-  var lead = myMat - opMat;
   if (g.noCap >= 40 && lead > 0){
     s -= (g.noCap - 40) * (0.35 + Math.min(lead, 300) / 300);
   }

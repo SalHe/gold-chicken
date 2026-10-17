@@ -10,6 +10,9 @@ import { listDemos } from "./demo.js";
 
 let gridEl = null, pieceEl = null, stackEl = null;
 let cellEls = [], cache = new Map();
+/* 被用户关掉的结束界面。记结果对象本身而不是布尔值：
+   新一局的结果是另一个对象，界面会重新弹出。 */
+let dismissedResult = null;
 
 /* 懒解析 DOM：import ui.js 时不碰 document，测试可自由控制导入顺序 */
 export function initUi(){
@@ -176,11 +179,42 @@ export function render(){
   renderPanel();
   renderVictory();
 }
+/* 结束界面的查看控制：按住暂时隐藏以回看棋局，松开恢复；
+   也可以彻底关闭——关闭后棋局仍是只读的（onCell 在 result 时直接返回）。 */
+/* 「按住查看」把遮罩和牌子一起淡出，但元素仍在原地接收指针事件：
+   若直接 hidden 掉，按住的手指会在下一帧丢失目标，松开事件就收不到了。
+   用透明度隐藏还避免重排，松开时不会闪。 */
+export function hideVictory(){
+  var v = document.getElementById("victory");
+  if (v.hidden) return;
+  v.classList.add("peek");
+}
+export function restoreVictory(){
+  var v = document.getElementById("victory");
+  v.classList.remove("peek");
+  var g = getGame();
+  v.hidden = !g || !g.result || dismissedResult === g.result;
+}
+export function dismissVictory(){
+  var g = getGame();
+  dismissedResult = g && g.result ? g.result : null;
+  var v = document.getElementById("victory");
+  v.classList.remove("peek");
+  v.hidden = true;
+}
+export function isVictoryDismissed(){
+  var g = getGame();
+  return !!(g && g.result && dismissedResult === g.result);
+}
 /* 终局大告示：铺满棋盘的一张牌，压过其它所有提示 */
 export function renderVictory(){
   var g = getGame();
   var v = document.getElementById("victory");
-  if (!g.result){ v.hidden = true; return; }
+  if (!g.result || dismissedResult === g.result){
+    v.classList.remove("peek");
+    v.hidden = true;
+    return;
+  }
   var r = g.result, cls = "victory", badge, title, why;
   if (r.kind === "win"){
     var red = r.winner === "r";
@@ -193,7 +227,9 @@ export function renderVictory(){
     title = "和棋";
     why = r.why;
   }
+  var peeking = v.classList.contains("peek");
   v.className = cls;
+  if (peeking) v.classList.add("peek");
   document.getElementById("vBadge").textContent = badge;
   document.getElementById("vTitle").textContent = title;
   document.getElementById("vWhy").textContent = why;
@@ -242,7 +278,9 @@ export function renderPanel(){
   if (isReplaying()){
     hint.textContent = "回放中 · 点行棋记录可跳到那一手 · 也可从当前局面接着下";
   } else if (g.result){
-    hint.textContent = "本局已结束 —— 点棋盘中央的「再来一盘」开新局";
+    hint.textContent = isVictoryDismissed()
+      ? "本局已结束 · 结束界面已关闭，点「重新开局」开始新的一盘"
+      : "本局已结束 —— 点棋盘中央的「再来一盘」开新局，或按住「查看棋局」回看";
   } else if (pendingMove() && pendingMove().kind === "self"){
     var sp = g.board[sel], tp = g.board[armed];
     hint.textContent = "⚠ 再点一次同一格确认自残：" + pname(sp)
@@ -299,7 +337,8 @@ export function renderPanel(){
   lg.scrollTop = lg.scrollHeight;
 
   document.getElementById("btnUndo").disabled =
-    getUndoStack().length === 0 || !!g.result || mode === "aiai" || isReplaying();
+    getUndoStack().length === 0 || !!g.result || isReplaying() ||
+    (mode === "aiai" && !getAiPaused());
   document.getElementById("btnSaveDemo").disabled = isReplaying() || !getActions().length;
 
   renderDemos();
@@ -331,6 +370,7 @@ export function renderDemos(){
     return '<div class="demo">' +
       '<button class="demo-play" data-play="' + esc(d.id) + '" title="回放">▶</button>' +
       '<span class="demo-info"><b>' + esc(when) + "</b> · " + ((d.actions && d.actions.length) || 0) + " 手 · " + esc(res) + "</span>" +
+      '<button class="demo-copy" data-copy="' + esc(d.id) + '" title="复制这一局的 JSON">复制</button>' +
       '<button class="demo-del" data-del="' + esc(d.id) + '" title="删除">删</button>' +
     "</div>";
   }).join("");

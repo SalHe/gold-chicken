@@ -1,7 +1,7 @@
 /* 装配/启动：change hook、scheduleAI、模式切换、Demo 回放、事件绑定、bootstrap（esbuild 入口）。 */
 import { aiPick } from "./ai.js";
 import * as ui from "./ui.js";
-import { getDemo, saveDemo, removeDemo, newDemoId } from "./demo.js";
+import { getDemo, saveDemo, removeDemo, newDemoId, parseDemos, importDemos } from "./demo.js";
 import {
   setChanged, newGame, snapshot, commit, isAITurn, undo,
   getGame, getMode, getAiFirst, setAiFirst, getUndoStack, getActions, getBaseSnapshot,
@@ -13,6 +13,31 @@ import {
 let aiTimer = null;
 let replayTimer = null;
 let replayDemo = null;
+
+/* ---------- 剪贴板 ---------- */
+/* 异步剪贴板 API 在非安全上下文 / 部分浏览器里不可用，退回 execCommand。 */
+function copyText(text){
+  try{
+    if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText){
+      return navigator.clipboard.writeText(text);
+    }
+  }catch(e){}
+  return Promise.reject(new Error("clipboard unavailable"));
+}
+function legacyCopy(text){
+  var ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.top = "-1000px";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  var ok = false;
+  try{ ok = !!(document.execCommand && document.execCommand("copy")); }catch(e){}
+  document.body.removeChild(ta);
+  return ok;
+}
 
 function stopAI(){ if (aiTimer){ clearTimeout(aiTimer); aiTimer = null; } }
 
@@ -152,6 +177,43 @@ function start(){
   document.getElementById("btnNew").addEventListener("click", freshGame);
   document.getElementById("vBtn").addEventListener("click", freshGame);
 
+  /* 结束界面：按住「查看棋局」暂时隐藏，松开恢复；「关闭」彻底收起。
+     关闭后 onCell 仍因 result 直接返回，棋局保持只读。 */
+  var vPeek = document.getElementById("vPeek");
+  var peeking = false;
+  function startPeek(e){
+    if (e && e.pointerType === "mouse" && e.button !== 0) return;
+    if (e && e.preventDefault) e.preventDefault();
+    peeking = true;
+    ui.hideVictory();
+  }
+  function endPeek(){
+    if (!peeking) return;
+    peeking = false;
+    ui.restoreVictory();
+  }
+  vPeek.addEventListener("pointerdown", startPeek);
+  vPeek.addEventListener("pointerleave", endPeek);
+  vPeek.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+  /* 键盘：按住空格/回车同样可以短暂查看 */
+  vPeek.addEventListener("keydown", function(e){
+    if (e.key !== " " && e.key !== "Enter") return;
+    e.preventDefault();
+    if (!peeking){ peeking = true; ui.hideVictory(); }
+  });
+  vPeek.addEventListener("keyup", function(e){
+    if (e.key === " " || e.key === "Enter") endPeek();
+  });
+  vPeek.addEventListener("blur", endPeek);
+  /* 手指/鼠标在按钮外松开也要恢复，否则结束界面会一直隐身 */
+  window.addEventListener("pointerup", endPeek);
+  window.addEventListener("pointercancel", endPeek);
+  document.getElementById("vClose").addEventListener("click", function(){
+    endPeek();
+    ui.dismissVictory();
+    ui.render();
+  });
+
   document.getElementById("btnUndo").addEventListener("click", function(){
     if (isReplaying() || !getUndoStack().length) return;
     stopAI();
@@ -182,18 +244,70 @@ function start(){
     setTimeout(function(){ btnSaveDemo.textContent = "保存 Demo"; }, 1200);
   });
 
-  /* Demo 列表：▶ 回放 / 删 删除 */
+  /* Demo 列表：▶ 回放 / 复制 / 删 删除 */
   document.getElementById("demoList").addEventListener("click", function(e){
-    var t = e.target.closest ? e.target.closest("[data-play],[data-del]") : null;
+    var t = e.target.closest ? e.target.closest("[data-play],[data-copy],[data-del]") : null;
     if (!t) return;
     if (t.hasAttribute("data-del")){
       removeDemo(t.getAttribute("data-del"));
       ui.renderDemos();
       return;
     }
+    if (t.hasAttribute("data-copy")){
+      var dc = getDemo(t.getAttribute("data-copy"));
+      if (!dc) return;
+      var label = t, txt = JSON.stringify(dc);
+      var show = function(ok){
+        label.textContent = ok ? "✓" : "失败";
+        setTimeout(function(){ label.textContent = "复制"; }, 1200);
+      };
+      copyText(txt).then(function(){ show(true); }, function(){ show(legacyCopy(txt)); });
+      return;
+    }
     var d = getDemo(t.getAttribute("data-play"));
     if (d) playDemo(d);
   });
+
+  /* Demo 导入：先直接读剪贴板；读不到（无权限 / 浏览器不支持）就展开粘贴框 */
+  var importBtn = document.getElementById("btnDemoImport");
+  var importBox = document.getElementById("demoImportBox");
+  var importText = document.getElementById("demoImportText");
+  var importTimer = null;
+  function importFeedback(msg){
+    importBtn.textContent = msg;
+    if (importTimer) clearTimeout(importTimer);
+    importTimer = setTimeout(function(){ importBtn.textContent = "从剪贴板导入"; }, 1600);
+  }
+  function showImportBox(){
+    importBox.hidden = false;
+    try{ importText.focus(); }catch(e){}
+  }
+  function hideImportBox(){ importBox.hidden = true; }
+  function doImport(text){
+    var parsed = parseDemos(text);
+    var added = importDemos(text);
+    ui.renderDemos();
+    if (!parsed.length){ importFeedback("不是有效的 Demo"); return; }
+    hideImportBox();
+    importText.value = "";
+    importFeedback(added ? "已导入 " + added + " 局 ✓" : "这些对局已在列表里");
+  }
+  importBtn.addEventListener("click", function(){
+    var p;
+    try{
+      p = (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.readText)
+        ? navigator.clipboard.readText()
+        : Promise.reject(new Error("clipboard unavailable"));
+    }catch(e){ p = Promise.reject(e); }
+    p.then(function(text){
+      if (text && text.trim()) doImport(text);
+      else showImportBox();
+    }, showImportBox);
+  });
+  document.getElementById("btnDemoImportDo").addEventListener("click", function(){
+    doImport(importText.value || "");
+  });
+  document.getElementById("btnDemoImportCancel").addEventListener("click", hideImportBox);
 
   document.getElementById("btnReplayStop").addEventListener("click", exitReplay);
   document.getElementById("btnReplayBack").addEventListener("click", function(){

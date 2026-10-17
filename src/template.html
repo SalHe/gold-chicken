@@ -45,7 +45,11 @@
               <div class="vbadge" id="vBadge">胜</div>
               <div class="vtitle" id="vTitle"></div>
               <div class="vwhy" id="vWhy"></div>
-              <button class="vbtn" id="vBtn">再来一盘</button>
+              <div class="vacts">
+                <button class="vbtn" id="vBtn">再来一盘</button>
+                <button class="vbtn ghost" id="vPeek" title="按住查看棋局，松开恢复">按住查看棋局</button>
+                <button class="vbtn ghost" id="vClose" title="关闭结束界面；棋局保持只读">关闭</button>
+              </div>
             </div>
           </div>
         </div>
@@ -111,6 +115,16 @@
     <div class="card">
       <h2 class="t">对局 Demo</h2>
       <div class="demo-list" id="demoList"></div>
+      <div class="demo-tools">
+        <button class="demo-import" id="btnDemoImport" title="读取剪贴板里的 Demo JSON 并导入">从剪贴板导入</button>
+        <div class="demo-importbox" id="demoImportBox" hidden>
+          <textarea id="demoImportText" placeholder="剪贴板读不到时，在这里粘贴 Demo JSON（单条或数组）" aria-label="粘贴 Demo JSON"></textarea>
+          <div class="demo-importacts">
+            <button class="demo-import" id="btnDemoImportDo">导入</button>
+            <button class="demo-import" id="btnDemoImportCancel">取消</button>
+          </div>
+        </div>
+      </div>
     </div>
   </aside>
 </div>

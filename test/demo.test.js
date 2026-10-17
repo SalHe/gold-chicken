@@ -265,4 +265,49 @@ describe("Demo 存储", () => {
     expect(demo.saveDemo(null)).toBe(false);
     expect(demo.listDemos()).toEqual([]);
   });
+
+  function validDemo(id, cell){
+    return {
+      id: id, at: 123, result: null,
+      start: JSON.stringify({ g: { board: [cell || 0] } }),
+      actions: [{ kind: "move", from: 0, to: 1 }]
+    };
+  }
+
+  it("parseDemos 接受单条、数组与整份列表，跳过坏条目", () => {
+    var d = validDemo("d1");
+    expect(demo.parseDemos(JSON.stringify(d))).toHaveLength(1);
+    expect(demo.parseDemos(JSON.stringify([d, validDemo("d2")]))).toHaveLength(2);
+    expect(demo.parseDemos("not json")).toEqual([]);
+    expect(demo.parseDemos(JSON.stringify([
+      d,
+      { start: "{}", actions: [{ kind: "flip" }] },       /* start 里没有棋盘 */
+      { start: "not json", actions: [{ kind: "flip" }] },
+      { start: d.start, actions: [] },                    /* 没有动作 */
+      null
+    ]))).toHaveLength(1);
+  });
+
+  it("importDemos 导入有效条目并跳过完全重复的对局", () => {
+    globalThis.localStorage = stub();
+    expect(demo.importDemos("not json")).toBe(0);
+    expect(demo.importDemos(JSON.stringify([validDemo("d1")]))).toBe(1);
+    expect(demo.importDemos(JSON.stringify([validDemo("d1")]))).toBe(0);
+    expect(demo.listDemos()).toHaveLength(1);
+  });
+
+  it("导入时保留可用 id，冲突或缺失则重新分配", () => {
+    globalThis.localStorage = stub();
+    demo.importDemos(JSON.stringify([validDemo("d1", 1)]));
+    demo.importDemos(JSON.stringify([validDemo("d1", 2)]));     /* 同 id、不同对局 */
+    var noId = validDemo("", 3);
+    demo.importDemos(JSON.stringify([noId]));
+
+    var list = demo.listDemos();
+    expect(list).toHaveLength(3);
+    var ids = list.map(function(d){ return d.id; });
+    expect(ids.filter(function(x){ return x === "d1"; })).toHaveLength(1);
+    ids.forEach(function(x){ expect(x).toBeTruthy(); });
+    expect(new Set(ids).size).toBe(3);
+  });
 });

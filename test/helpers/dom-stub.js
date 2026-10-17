@@ -48,6 +48,10 @@ export function installDomStub(){
     createElement(t){ return El(t); },
     addEventListener(){}
   };
-  globalThis.window = {};
+  globalThis.window = {
+    _ls: {},
+    addEventListener(type, fn){ (this._ls[type] || (this._ls[type] = [])).push(fn); },
+    removeEventListener(){}
+  };
 }
 export { El };
