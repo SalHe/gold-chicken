@@ -340,6 +340,7 @@ export function renderPanel(){
     getUndoStack().length === 0 || !!g.result || isReplaying() ||
     (mode === "aiai" && !getAiPaused());
   document.getElementById("btnSaveDemo").disabled = isReplaying() || !getActions().length;
+  document.getElementById("btnCopyDemo").disabled = isReplaying() || !getActions().length;
 
   renderDemos();
   renderReplay();

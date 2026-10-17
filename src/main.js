@@ -226,22 +226,43 @@ function start(){
     syncPace();
   });
 
-  var btnSaveDemo = document.getElementById("btnSaveDemo");
-  btnSaveDemo.addEventListener("click", function(){
-    if (isReplaying()) return;
+  /* 当前对局打包成 Demo：起始快照 + 走子序列，保存和复制共用。
+     回放中或还没走过子时没有可导出的对局，返回 null。 */
+  function currentDemo(){
+    if (isReplaying()) return null;
     var acts = getActions(), start0 = getBaseSnapshot();
-    if (!acts.length || !start0) return;
+    if (!acts.length || !start0) return null;
     var g = getGame();
-    var ok = saveDemo({
+    return {
       id: newDemoId(),
       at: Date.now(),
       result: g.result || null,
       start: start0,
       actions: acts.slice()
-    });
+    };
+  }
+
+  var btnSaveDemo = document.getElementById("btnSaveDemo");
+  btnSaveDemo.addEventListener("click", function(){
+    var demo = currentDemo();
+    if (!demo) return;
+    var ok = saveDemo(demo);
     ui.renderDemos();
     btnSaveDemo.textContent = ok ? "已保存 ✓" : "保存失败";
     setTimeout(function(){ btnSaveDemo.textContent = "保存 Demo"; }, 1200);
+  });
+
+  /* 只复制，不写 localStorage */
+  var btnCopyDemo = document.getElementById("btnCopyDemo");
+  btnCopyDemo.addEventListener("click", function(){
+    var demo = currentDemo();
+    if (!demo) return;
+    var txt = JSON.stringify(demo);
+    var done = function(ok){
+      btnCopyDemo.textContent = ok ? "已复制 ✓" : "复制失败";
+      setTimeout(function(){ btnCopyDemo.textContent = "复制当前 Demo"; }, 1200);
+    };
+    copyText(txt).then(function(){ done(true); }, function(){ done(legacyCopy(txt)); });
   });
 
   /* Demo 列表：▶ 回放 / 复制 / 删 删除 */
