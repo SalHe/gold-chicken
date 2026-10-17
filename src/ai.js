@@ -218,6 +218,13 @@ export function evalPos(g, col){
     s -= isProtected(g, myDragon, col, opRooster, ctx.bl) ? 10 : 22;
   }
 
+  /* 己方金鸡正被攻击、而敌方龙还在：这枚制衡子比子力表更值得保 */
+  if (myRooster >= 0 && opDragon >= 0){
+    for (i = 0; i < theirs.length; i++){
+      if (kindAt[theirs[i]] && kindAt[theirs[i]][myRooster] === "capture"){ s -= 10; break; }
+    }
+  }
+
   /* 机动性：金鸡的全盘飞行也会体现在这里 */
   var myMob = 0, opMob = 0;
   for (i = 0; i < mine.length; i++) myMob += Math.min(mvs[mine[i]].length, 20);
