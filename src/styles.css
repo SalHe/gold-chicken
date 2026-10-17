@@ -301,13 +301,20 @@ body{
 }
 .piece:hover{z-index:9}
 .piece.sel{z-index:10}
-/* 河格里被压住的棋子：缩小、偏到右下角，垫在压它的子下面，不可点 */
-.piece.pressed{
-  z-index:3; pointer-events:none; cursor:default;
-  transform:translate(calc(var(--px, 0) * (var(--cellw) + var(--gap)) + var(--cellw) * .22),
-                    calc(var(--py, 0) * (var(--cellw) + var(--gap)) + var(--cellw) * .22)) scale(.58);
+/* 河格压子：上子微缩、偏向左上；被压的子缩成右下角的小徽记并浮在上层，
+   这样两枚棋子的名字都看得见，能直接读出压住的是谁。 */
+.piece.pressing{
+  z-index:5;
+  transform:translate(calc(var(--px, 0) * (var(--cellw) + var(--gap)) - var(--cellw) * .10),
+                    calc(var(--py, 0) * (var(--cellw) + var(--gap)) - var(--cellw) * .10)) scale(.82);
 }
-.piece.pressed .disc{inset:1px; box-shadow:0 0 0 1.5px var(--gold-soft), inset 0 0 0 1px rgba(0,0,0,.28)}
+.piece.pressed{
+  z-index:6; pointer-events:none; cursor:default;
+  transform:translate(calc(var(--px, 0) * (var(--cellw) + var(--gap)) + var(--cellw) * .30),
+                    calc(var(--py, 0) * (var(--cellw) + var(--gap)) + var(--cellw) * .30)) scale(.5);
+}
+.piece.pressed .disc{inset:1px; box-shadow:0 0 0 2px var(--gold-soft), 0 2px 6px rgba(0,0,0,.35), inset 0 0 0 1px rgba(0,0,0,.28)}
+.piece.pressed .disc.front .num{display:none}
 .piece.sel .disc.front{box-shadow:0 0 0 3px var(--gold), 0 0 18px 2px var(--gold-soft)}
 .piece.cap .disc::after{
   content:""; position:absolute; inset:-3px; border-radius:50%;
@@ -490,6 +497,9 @@ button.act:disabled{opacity:.45; cursor:not-allowed}
 .rp-select:hover{background:var(--gold-soft); border-color:var(--gold)}
 .rp-select:focus-visible{outline:2px solid var(--gold); outline-offset:2px}
 .rp-select:disabled{opacity:.45; cursor:not-allowed}
+/* 原生下拉列表在部分浏览器里不跟随 color-scheme，暗色模式下会变成
+   浅字浅底。显式给出与主题一致的选项配色。 */
+.rp-select option{background:var(--surface); color:var(--fg)}
 .demo-list{
   display:flex; flex-direction:column; gap:6px;
   max-height:210px; overflow-y:auto; margin-top:6px;

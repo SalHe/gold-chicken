@@ -86,6 +86,26 @@ describe("河格压子", () => {
     expect(dive && dive.to).toBe(to);
   });
 
+  it("河边陆地格可以跳进任意空河格", () => {
+    const bank = xy2i(1, 4), bank2 = xy2i(4, 4);
+    const land23 = xy2i(2, 3), land33 = xy2i(3, 3);
+    const r24 = xy2i(2, 4), r34 = xy2i(3, 4);
+    /* 左上角 (2,3) 斜对着 (3,4)，也要能跳过去 */
+    state.setGame(mk([[land23, LEOPARD], [bank, 3], [bank2, 3]], []));
+    expect(rules.movesFor(state.getGame(), land23)
+      .filter(m => m.kind === "dive").map(m => m.to).sort())
+      .toEqual([r24, r34].sort());
+    /* 右上角 (3,3) 同理 */
+    state.setGame(mk([[land33, LEOPARD], [bank, 3], [bank2, 3]], []));
+    expect(rules.movesFor(state.getGame(), land33)
+      .filter(m => m.kind === "dive").map(m => m.to).sort())
+      .toEqual([r24, r34].sort());
+    /* 不紧挨河界的陆地豹没有这条着法 */
+    const far = xy2i(1, 2);
+    state.setGame(mk([[far, LEOPARD], [bank, 3], [bank2, 3]], []));
+    expect(rules.movesFor(state.getGame(), far).some(m => m.kind === "dive")).toBe(false);
+  });
+
   it("引爆会炸掉河格上下两层", () => {
     const L = xy2i(1, 4), R = xy2i(4, 4), lp = xy2i(2, 3);
     const stack = xy2i(3, 4);

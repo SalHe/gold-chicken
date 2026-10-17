@@ -100,6 +100,15 @@ export function movesFor(g, i){
     return out;
   }
 
+  /* 堵岸时，紧挨河界的陆地豹可以扑进任意一个空河格引爆（站在岸上不行）。
+     跳河不算一步走，因此不限于正对的那一格河。 */
+  if (p.t === LEOPARD && bl && !isBank(i) && touchesRiver(i)){
+    for (k = 0; k < N; k++){
+      if (!isRiver(k) || g.board[k]) continue;
+      out.push({ from: i, to: k, kind: "dive" });
+    }
+  }
+
   for (k = 0; k < 4; k++){
     nx = c.x + DIRS[k][0]; ny = c.y + DIRS[k][1];
     if (nx < 1 || nx > W || ny < 1 || ny > H) continue;
@@ -109,8 +118,6 @@ export function movesFor(g, i){
       if (p.t === DRAGON || p.t === ELEPHANT){        /* 龙、象可下河；遇到敌子则压住 */
         lc = riverCheck(g, p, ni);
         if (lc.ok) out.push({ from: i, to: ni, kind: lc.kind });
-      } else if (p.t === LEOPARD && bl && !isBank(i)){ /* 堵岸时豹可从陆地跳河引爆；岸上不行 */
-        if (!g.board[ni]) out.push({ from: i, to: ni, kind: "dive" });
       }
       continue;
     }

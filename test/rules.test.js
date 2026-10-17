@@ -262,6 +262,10 @@ describe("豹引爆", () => {
     const dv = rules.movesFor(state.getGame(), lp).find(m => m.to === river);
     expect(dv && dv.kind).toBe("dive");
     state.getGame().board[river] = { t: 5, c: "b", rv: true, uid: 88 };
+    /* 一个河格被占，仍可从 (2,3) 扑向另一格空河 */
+    const other = xy2i(3, 4);
+    expect(rules.movesFor(state.getGame(), lp).some(m => m.to === other && m.kind === "dive")).toBe(true);
+    state.getGame().board[other] = { t: 6, c: "b", rv: true, uid: 89 };
     expect(rules.movesFor(state.getGame(), lp).some(m => m.kind === "dive")).toBe(false);
 
     const setup = mk([[lp, LEOPARD], [L, 3], [R, 3]], [[xy2i(2, 3), 1], [xy2i(4, 5), 2], [xy2i(1, 6), 3]]);

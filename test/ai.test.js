@@ -1,6 +1,6 @@
 /* AI 策略：终局意识、兑子/保护估值、堵岸、压子价值、暗棋公平性。 */
 import { describe, it, expect } from "vitest";
-import { N, DRAGON, ELEPHANT, LEOPARD, VAL } from "../src/constants.js";
+import { N, DRAGON, ELEPHANT, LEOPARD, ROOSTER, VAL } from "../src/constants.js";
 import * as rules from "../src/rules.js";
 import * as ai from "../src/ai.js";
 import { mk, xy2i } from "./helpers/factory.js";
@@ -84,6 +84,34 @@ describe("局面估值", () => {
     const pressElephant = mk([[cell, ELEPHANT]], [[free, DRAGON]]);
     pressElephant.board[cell].under = { t: ELEPHANT, c: "b", rv: true, uid: 99 };
     expect(ai.evalPos(pressDragon, "r")).toBeGreaterThan(ai.evalPos(pressElephant, "r") + 10);
+  });
+});
+
+describe("龙、金鸡与河界", () => {
+  it("受到敌方金鸡威胁时，龙沉入河中更安全", () => {
+    const land = mk([[xy2i(2, 3), DRAGON]], [[xy2i(4, 7), ROOSTER]]);
+    const river = mk([[xy2i(2, 4), DRAGON]], [[xy2i(4, 7), ROOSTER]]);
+    expect(ai.evalPos(river, "r")).toBeGreaterThan(ai.evalPos(land, "r") + 30);
+  });
+
+  it("AI 会把被金鸡盯上的龙挪进河里", () => {
+    const g = mk([[xy2i(2, 3), DRAGON]], [[xy2i(4, 7), ROOSTER]]);
+    expect(ai.aiPick(g, 0).to).toBe(xy2i(2, 4));
+  });
+
+  it("堵岸把敌方金鸡挡在河界另一侧时，己方龙更安全", () => {
+    const bankL = xy2i(1, 4), bankR = xy2i(4, 4), dragon = xy2i(1, 2);
+    const reds = [[bankL, 3], [bankR, LEOPARD], [dragon, DRAGON]];
+    const farSide = mk(reds, [[xy2i(4, 7), ROOSTER]]);
+    const sameSide = mk(reds, [[xy2i(4, 2), ROOSTER]]);
+    expect(ai.evalPos(farSide, "r")).toBeGreaterThan(ai.evalPos(sameSide, "r") + 40);
+  });
+
+  it("豹能一波炸掉更多敌子时，引爆期权更有价值", () => {
+    const reds = [[xy2i(1, 4), 11], [xy2i(4, 4), 10], [xy2i(2, 3), LEOPARD]];
+    const inZone = mk(reds, [[xy2i(4, 5), DRAGON], [xy2i(3, 5), ELEPHANT]]);
+    const outside = mk(reds, [[xy2i(4, 6), DRAGON], [xy2i(3, 6), ELEPHANT]]);
+    expect(ai.evalPos(inZone, "r")).toBeGreaterThan(ai.evalPos(outside, "r") + 15);
   });
 });
 

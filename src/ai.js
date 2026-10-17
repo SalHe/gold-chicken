@@ -179,6 +179,20 @@ export function evalPos(g, col){
     }
   }
 
+  /* 龙与金鸡是天然的制衡关系：金鸡是唯一能稳定换掉龙的子，龙又吃不了金鸡。
+     暗棋不参与判断，这里只看已经翻开的棋子。 */
+  var myDragon = -1, opDragon = -1, myRooster = -1, opRooster = -1;
+  for (i = 0; i < mine.length; i++){
+    p = g.board[mine[i]];
+    if (p.t === DRAGON) myDragon = mine[i];
+    else if (p.t === ROOSTER) myRooster = mine[i];
+  }
+  for (i = 0; i < theirs.length; i++){
+    p = g.board[theirs[i]];
+    if (p.t === DRAGON) opDragon = theirs[i];
+    else if (p.t === ROOSTER) opRooster = theirs[i];
+  }
+
   /* 威胁：区分吃子 / 邀兑 / 压子 / 渴死，并考虑目标有无保护 */
   var a, b;
   for (a = 0; a < mine.length; a++){
@@ -192,17 +206,40 @@ export function evalPos(g, col){
     }
   }
 
+  /* 金鸡的制衡价值：己方金鸡在场，敌方的龙就不敢放肆；敌方金鸡在场，
+     己方龙则要格外小心。这是子力表之外的额外权重。 */
+  if (myRooster >= 0 && opDragon >= 0) s += 12;
+  if (opRooster >= 0 && myDragon >= 0) s -= 12;
+
+  /* 己方龙正被敌方金鸡盯上：哪怕有子保护，龙换鸡也是巨亏。
+     在常规威胁项之外再加一笔，确保 AI 优先把龙挪开或沉进河里。 */
+  if (myDragon >= 0 && opRooster >= 0 &&
+      kindAt[opRooster] && kindAt[opRooster][myDragon] === "capture"){
+    s -= isProtected(g, myDragon, col, opRooster, ctx.bl) ? 10 : 22;
+  }
+
   /* 机动性：金鸡的全盘飞行也会体现在这里 */
   var myMob = 0, opMob = 0;
   for (i = 0; i < mine.length; i++) myMob += Math.min(mvs[mine[i]].length, 20);
   for (i = 0; i < theirs.length; i++) opMob += Math.min(mvs[theirs[i]].length, 20);
   s += (myMob - opMob) * 0.3;
 
-  /* 位置：贴河更活；河中子只能被对方龙/象压，是安全屋 */
+  /* 位置：贴河更活；河中是安全屋——河中子不会被吃（只能被压），
+     尤其龙进河后，敌方金鸡再也够不到它。敌方堵岸会把河中子冰封，
+     这份保护价值随之大打折扣。 */
+  var riverSafe = !ctx.bl || ctx.bl === col;
   for (i = 0; i < mine.length; i++){
     var c = xy(mine[i]);
     if (c.y === 3 || c.y === 5) s += 1.0;
-    if (isRiver(mine[i])) s += 2.0;
+    if (isRiver(mine[i])){
+      if (riverSafe){
+        s += 2.0 + 0.08 * VAL[g.board[mine[i]].t];
+        /* 有敌方金鸡时，龙沉在河里比留在岸上安全得多 */
+        if (g.board[mine[i]].t === DRAGON && opRooster >= 0) s += 8;
+      } else {
+        s += 1.0;               /* 被敌方堵岸冰封：仍然安全，但失去机动 */
+      }
+    }
   }
 
   /* 河格压子：按被压棋子的价值计价（河里只有龙/象会被压） */
@@ -225,6 +262,11 @@ export function evalPos(g, col){
     }
     var bv = 45 + 0.3 * frozen;
     if (ctx.dive[otherColor(bl)]) bv *= 0.55;   /* 对方随时可以炸掉堵岸 */
+    /* 堵岸的另一个用处：把敌方金鸡拦在河界另一侧，己方龙才真正安全 */
+    if (bl === col && myDragon >= 0 && opRooster >= 0 && !isRiver(myDragon)){
+      var dy = xy(myDragon).y, ry = xy(opRooster).y;
+      if ((dy < 4) !== (ry < 4)) bv += 16;
+    }
     s += bl === col ? bv : -bv;
   }
 
@@ -240,6 +282,30 @@ export function evalPos(g, col){
       if (p.under && p.under.c === col) risk += VAL[p.under.t];
     }
     s -= 0.18 * risk;
+  }
+
+  /* 豹的引爆期权：堵岸时双方都能把 Y3–Y5 一波带走。若己方的豹随时能炸，
+     而敌人在这一带堆了更多子力，这张牌本身就有价值——己方大子阵亡后，
+     豹的这手「全换」正是翻盘手段，因此落后时权重更高。
+     暗棋身份未知，不计入爆区价值。 */
+  if (ctx.bl){
+    var zone = { r: 0, b: 0 };
+    for (i = 0; i < N; i++){
+      p = g.board[i];
+      if (!p) continue;
+      var zc = xy(i);
+      if (zc.y < 3 || zc.y > 5) continue;
+      if (p.rv) zone[p.c] += VAL[p.t];
+      if (p.under && p.under.rv) zone[p.under.c] += VAL[p.under.t];
+    }
+    if (ctx.dive[col]){
+      var net = zone[opp] - zone[col];
+      if (net > 0) s += 0.22 * net * (myMat < opMat ? 1.3 : 1);
+    }
+    if (ctx.dive[opp]){
+      var onet = zone[col] - zone[opp];
+      if (onet > 0) s -= 0.22 * onet * (opMat < myMat ? 1.3 : 1);
+    }
   }
   return s;
 }

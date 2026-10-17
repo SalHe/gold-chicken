@@ -86,6 +86,7 @@ export function syncPieces(){
       el.classList.add(p.c === "r" ? "red" : "black");
       if (!p.rv) el.classList.add("hidden");
       if (pressed) el.classList.add("pressed");
+      else if (p.under) el.classList.add("pressing");
       pieceEl.appendChild(el);
       cache.set(p.uid, el);
       return;
@@ -97,6 +98,7 @@ export function syncPieces(){
     el.classList.toggle("red", p.c === "r");
     el.classList.toggle("black", p.c === "b");
     el.classList.toggle("pressed", pressed);
+    el.classList.toggle("pressing", !pressed && !!p.under);
     if (pressed){
       el.classList.remove("sel", "cap", "selfcap", "armed", "doomed");
       return;
