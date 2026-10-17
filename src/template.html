@@ -48,6 +48,12 @@
       </div>
     </div>
     <div class="hint" id="hint"></div>
+    <div class="replaybar" id="replayBar" hidden>
+      <span class="rp-info" id="replayInfo"></span>
+      <button class="rp-btn" id="btnReplayPlay">暂停</button>
+      <button class="rp-btn" id="btnReplayStep">单步</button>
+      <button class="rp-btn" id="btnReplayStop">退出回放</button>
+    </div>
   </div>
 
   <aside class="panel">
@@ -85,8 +91,14 @@
       <div class="btns">
         <button class="act primary" id="btnNew">重新开局</button>
         <button class="act" id="btnUndo">悔棋</button>
+        <button class="act" id="btnSaveDemo">保存 Demo</button>
         <button class="act" id="btnRules">规则详解</button>
       </div>
+    </div>
+
+    <div class="card">
+      <h2 class="t">对局 Demo</h2>
+      <div class="demo-list" id="demoList"></div>
     </div>
   </aside>
 </div>

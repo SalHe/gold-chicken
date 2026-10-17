@@ -465,6 +465,44 @@ button.act:disabled{opacity:.45; cursor:not-allowed}
   font-size:12.5px; color:var(--muted); text-align:center; max-width:330px; min-height:19px;
 }
 
+/* ---------- Demo 列表 / 回放条 ---------- */
+.replaybar{
+  display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:8px;
+  font-size:12.5px; color:var(--muted);
+}
+.replaybar[hidden]{display:none}
+.rp-info{font-variant-numeric:tabular-nums}
+.rp-btn{
+  font:inherit; font-size:12px; padding:5px 12px; border-radius:999px; cursor:pointer;
+  border:1px solid var(--line-strong); background:var(--surface-2); color:var(--fg);
+  transition:background .15s, border-color .15s;
+}
+.rp-btn:hover{background:var(--gold-soft); border-color:var(--gold)}
+.rp-btn:focus-visible{outline:2px solid var(--gold); outline-offset:2px}
+.rp-btn:disabled{opacity:.45; cursor:not-allowed}
+.demo-list{
+  display:flex; flex-direction:column; gap:6px;
+  max-height:210px; overflow-y:auto; margin-top:6px;
+}
+.demo{
+  display:flex; align-items:center; gap:8px; padding:5px 7px;
+  border:1px solid var(--line); border-radius:8px; background:var(--surface-2);
+}
+.demo-info{
+  flex:1; min-width:0; font-size:12.5px; color:var(--muted);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.demo-info b{color:var(--fg); font-weight:700; font-variant-numeric:tabular-nums}
+.demo-play, .demo-del{
+  flex:0 0 auto; font:inherit; font-size:12px; line-height:1; padding:5px 7px; border-radius:6px;
+  cursor:pointer; border:1px solid var(--line-strong); background:var(--surface); color:var(--fg);
+}
+.demo-play{min-width:28px; color:var(--gold); border-color:var(--gold)}
+.demo-play:hover{background:var(--gold); color:var(--bg)}
+.demo-del:hover{border-color:var(--red-bg); color:var(--red-bg)}
+.demo-play:focus-visible, .demo-del:focus-visible{outline:2px solid var(--gold); outline-offset:2px}
+.demo-empty{font-size:12.5px; color:var(--muted); line-height:1.6; padding:4px 0}
+
 /* ---------- 规则弹层 ---------- */
 .modal{position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; padding:20px}
 .modal[hidden]{display:none}

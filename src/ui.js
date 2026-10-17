@@ -3,8 +3,10 @@ import { N, NAME, NUM } from "./constants.js";
 import { xy, terrain, blockadeColor, isBank, pname, counts, movesFor } from "./rules.js";
 import {
   getGame, getSel, setSel, getCurMoves, setCurMoves, getArmed, setArmed,
-  getMode, getUndoStack, findMove, pendingMove, blastZone, commit, isAITurn
+  getMode, getUndoStack, getActions, findMove, pendingMove, blastZone, commit, isAITurn,
+  isReplaying, getReplayInfo
 } from "./state.js";
+import { listDemos } from "./demo.js";
 
 let gridEl = null, pieceEl = null, stackEl = null;
 let cellEls = [], cache = new Map();
@@ -233,7 +235,9 @@ export function renderPanel(){
   }
 
   var hint = document.getElementById("hint");
-  if (g.result){
+  if (isReplaying()){
+    hint.textContent = "回放中 · 棋盘只读，用下方按钮控制播放";
+  } else if (g.result){
     hint.textContent = "本局已结束 —— 点棋盘中央的「再来一盘」开新局";
   } else if (pendingMove() && pendingMove().kind === "self"){
     var sp = g.board[sel], tp = g.board[armed];
@@ -283,13 +287,55 @@ export function renderPanel(){
   lg.scrollTop = lg.scrollHeight;
 
   document.getElementById("btnUndo").disabled =
-    getUndoStack().length === 0 || !!g.result || mode === "aiai";
+    getUndoStack().length === 0 || !!g.result || mode === "aiai" || isReplaying();
+  document.getElementById("btnSaveDemo").disabled = isReplaying() || !getActions().length;
+
+  renderDemos();
+  renderReplay();
+}
+
+/* ---------- Demo 列表 / 回放条 ---------- */
+function esc(s){
+  return String(s).replace(/[&<>"']/g, function(c){
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
+function pad2(n){ return (n < 10 ? "0" : "") + n; }
+
+export function renderDemos(){
+  var box = document.getElementById("demoList");
+  var list = listDemos();
+  if (!list.length){
+    box.innerHTML = '<div class="demo-empty">还没有保存的对局 —— 走几步后点「保存 Demo」。</div>';
+    return;
+  }
+  box.innerHTML = list.map(function(d){
+    var t = new Date(d.at || 0);
+    var when = (t.getMonth() + 1) + "-" + t.getDate() + " " + pad2(t.getHours()) + ":" + pad2(t.getMinutes());
+    var res = !d.result ? "未完" :
+      (d.result.kind === "win"
+        ? ((d.result.winner === "r" ? "红方" : "黑方") + "胜")
+        : "和棋");
+    return '<div class="demo">' +
+      '<button class="demo-play" data-play="' + esc(d.id) + '" title="回放">▶</button>' +
+      '<span class="demo-info"><b>' + esc(when) + "</b> · " + ((d.actions && d.actions.length) || 0) + " 手 · " + esc(res) + "</span>" +
+      '<button class="demo-del" data-del="' + esc(d.id) + '" title="删除">删</button>' +
+    "</div>";
+  }).join("");
+}
+
+export function renderReplay(){
+  var bar = document.getElementById("replayBar");
+  var info = getReplayInfo();
+  if (!info){ bar.hidden = true; return; }
+  bar.hidden = false;
+  document.getElementById("replayInfo").textContent = "回放 " + info.idx + " / " + info.total + " 手";
 }
 
 /* ================= 交互 ================= */
 export function onCell(i){
   var g = getGame();
-  if (!g || g.result || isAITurn()) return;
+  if (!g || g.result || isReplaying() || isAITurn()) return;
   var p = g.board[i];
   var mine = g.pcolor[g.turn];
 

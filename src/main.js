@@ -1,22 +1,70 @@
-/* 装配/启动：change hook、scheduleAI、setMode、事件绑定、bootstrap（esbuild 入口）。 */
+/* 装配/启动：change hook、scheduleAI、模式切换、Demo 回放、事件绑定、bootstrap（esbuild 入口）。 */
 import { aiPick } from "./ai.js";
 import * as ui from "./ui.js";
+import { getDemo, saveDemo, removeDemo, newDemoId } from "./demo.js";
 import {
-  setChanged, newGame, restore, snapshot, commit, isAITurn,
-  getGame, getMode, getAiFirst, setAiFirst, getUndoStack, setMode as setStateMode
+  setChanged, newGame, snapshot, commit, isAITurn, undo,
+  getGame, getMode, getAiFirst, setAiFirst, getUndoStack, getActions, getBaseSnapshot,
+  isReplaying, getReplayInfo, beginReplay, replayStep, endReplay,
+  setMode as setStateMode
 } from "./state.js";
 
 let aiTimer = null;
+let replayTimer = null;
+let replayDemo = null;
+
+function stopAI(){ if (aiTimer){ clearTimeout(aiTimer); aiTimer = null; } }
 
 function scheduleAI(){
   if (aiTimer) clearTimeout(aiTimer);
   aiTimer = setTimeout(function(){
     aiTimer = null;
-    if (!isAITurn()) return;
+    if (isReplaying() || !isAITurn()) return;
     var g = getGame();
     var a = aiPick(g, g.turn);
     if (a) commit(a);
   }, 480 + Math.random() * 260);
+}
+
+/* ---------- Demo 回放 ---------- */
+function stopReplayTimer(){
+  if (replayTimer){ clearInterval(replayTimer); replayTimer = null; }
+}
+function updateReplayButtons(){
+  var on = isReplaying();
+  document.getElementById("btnReplayPlay").textContent = replayTimer ? "暂停" : "播放";
+  document.getElementById("btnReplayPlay").disabled = !on;
+  document.getElementById("btnReplayStep").disabled = !on;
+  document.getElementById("btnReplayStop").disabled = !on;
+}
+function startReplayTimer(){
+  stopReplayTimer();
+  replayTimer = setInterval(function(){
+    if (!replayStep()){
+      stopReplayTimer();
+      if (!isReplaying()) replayDemo = null;
+      updateReplayButtons();
+    }
+  }, 620);
+  updateReplayButtons();
+}
+function playDemo(d){
+  stopAI();
+  stopReplayTimer();
+  if (isReplaying()) endReplay();
+  replayDemo = d;
+  if (!beginReplay(d.start, d.actions)){
+    replayDemo = null;
+    updateReplayButtons();
+    return;
+  }
+  startReplayTimer();
+}
+function exitReplay(){
+  stopReplayTimer();
+  if (isReplaying()) endReplay();
+  replayDemo = null;
+  updateReplayButtons();
 }
 
 function syncModeButtons(){
@@ -31,9 +79,10 @@ function syncModeButtons(){
 }
 
 function setMode(m){
+  exitReplay();
   setStateMode(m);
   syncModeButtons();
-  if (aiTimer){ clearTimeout(aiTimer); aiTimer = null; }
+  stopAI();
   newGame();
 }
 
@@ -41,7 +90,7 @@ function start(){
   setChanged(function(reset){
     if (reset) ui.clearPieceCache();
     ui.render();
-    if (!getGame().result && isAITurn()) scheduleAI();
+    if (!getGame().result && !isReplaying() && isAITurn()) scheduleAI();
   });
 
   ui.initUi();
@@ -49,26 +98,76 @@ function start(){
   syncModeButtons();
   newGame();
 
-  document.getElementById("btnNew").addEventListener("click", function(){
-    if (aiTimer){ clearTimeout(aiTimer); aiTimer = null; }
+  function freshGame(){
+    exitReplay();
+    stopAI();
     newGame();
-  });
-  document.getElementById("vBtn").addEventListener("click", function(){
-    if (aiTimer){ clearTimeout(aiTimer); aiTimer = null; }
-    newGame();
-  });
+  }
+
+  document.getElementById("btnNew").addEventListener("click", freshGame);
+  document.getElementById("vBtn").addEventListener("click", freshGame);
+
   document.getElementById("btnUndo").addEventListener("click", function(){
-    var undoStack = getUndoStack();
-    if (!undoStack.length) return;
-    if (aiTimer){ clearTimeout(aiTimer); aiTimer = null; }
-    var s = undoStack.pop();
+    if (isReplaying() || !getUndoStack().length) return;
+    stopAI();
     /* 人机模式：一次悔棋退回到自己行棋前的一手（连电脑那一手一起退） */
-    if (getMode() === "ai"){
-      var humanTurn = getAiFirst() ? 1 : 0;
-      if (getGame().turn === humanTurn && undoStack.length) s = undoStack.pop();
-    }
-    restore(s);
+    var n = 1;
+    if (getMode() === "ai" && getGame().turn === (getAiFirst() ? 1 : 0)) n = 2;
+    undo(n);                       /* 悔棋栈保留，可以一直悔下去 */
   });
+
+  var btnSaveDemo = document.getElementById("btnSaveDemo");
+  btnSaveDemo.addEventListener("click", function(){
+    if (isReplaying()) return;
+    var acts = getActions(), start0 = getBaseSnapshot();
+    if (!acts.length || !start0) return;
+    var g = getGame();
+    saveDemo({
+      id: newDemoId(),
+      at: Date.now(),
+      result: g.result || null,
+      start: start0,
+      actions: acts.slice()
+    });
+    ui.renderDemos();
+    btnSaveDemo.textContent = "已保存 ✓";
+    setTimeout(function(){ btnSaveDemo.textContent = "保存 Demo"; }, 1200);
+  });
+
+  /* Demo 列表：▶ 回放 / 删 删除 */
+  document.getElementById("demoList").addEventListener("click", function(e){
+    var t = e.target.closest ? e.target.closest("[data-play],[data-del]") : null;
+    if (!t) return;
+    if (t.hasAttribute("data-del")){
+      removeDemo(t.getAttribute("data-del"));
+      ui.renderDemos();
+      return;
+    }
+    var d = getDemo(t.getAttribute("data-play"));
+    if (d) playDemo(d);
+  });
+
+  document.getElementById("btnReplayStop").addEventListener("click", exitReplay);
+  document.getElementById("btnReplayStep").addEventListener("click", function(){
+    if (!isReplaying()) return;
+    stopReplayTimer();
+    if (!replayStep() && !isReplaying()) replayDemo = null;
+    updateReplayButtons();
+  });
+  document.getElementById("btnReplayPlay").addEventListener("click", function(){
+    if (!isReplaying()) return;
+    if (replayTimer){ stopReplayTimer(); updateReplayButtons(); return; }
+    var info = getReplayInfo();
+    if (info && info.idx >= info.total && replayDemo){
+      var d = replayDemo;
+      endReplay();
+      if (beginReplay(d.start, d.actions)) startReplayTimer();
+      else { replayDemo = null; updateReplayButtons(); }
+      return;
+    }
+    startReplayTimer();
+  });
+
   var modal = document.getElementById("modal");
   document.getElementById("btnRules").addEventListener("click", function(){ modal.hidden = false; });
   modal.addEventListener("click", function(e){ if (e.target.hasAttribute("data-close")) modal.hidden = true; });
@@ -81,15 +180,13 @@ function start(){
     if (!getAiFirst()) return;
     setAiFirst(false);
     syncModeButtons();
-    if (aiTimer){ clearTimeout(aiTimer); aiTimer = null; }
-    newGame();
+    freshGame();
   });
   document.getElementById("aFirst").addEventListener("click", function(){
     if (getAiFirst()) return;
     setAiFirst(true);
     syncModeButtons();
-    if (aiTimer){ clearTimeout(aiTimer); aiTimer = null; }
-    newGame();
+    freshGame();
   });
 
   /* 页面被重新发布时保留对局 */
