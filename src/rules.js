@@ -113,11 +113,12 @@ export function movesFor(g, i){
     return out;
   }
 
-  /* 堵岸时，紧挨河界的陆地豹可以扑进任意一个空河格引爆（站在岸上不行）。
+  /* 堵岸时，紧挨河界的陆地豹可以扑进任意一个河格引爆（站在岸上不行）。
+     河里有没有棋子都能跳：落点上的棋子会随引爆一并阵亡。
      跳河不算一步走，因此不限于正对的那一格河。 */
   if (p.t === LEOPARD && bl && !isBank(i) && touchesRiver(i)){
     for (k = 0; k < N; k++){
-      if (!isRiver(k) || g.board[k]) continue;
+      if (!isRiver(k)) continue;
       out.push({ from: i, to: k, kind: "dive" });
     }
   }
@@ -192,6 +193,40 @@ export function applyMove(g, a){
   /* 本子若正压着别人，它一离开，底下的棋子就原地复位 */
   var below = p.under || null;
 
+  /* 豹跳河引爆：落点可以是任意河格——河里有没有棋子都能跳。
+     落点上的棋子（连同它压着的子）与 Y3–Y5 上的一切一并阵亡，
+     豹自己也在其中。 */
+  if (a.kind === "dive"){
+    var lost = [];
+    var occ = g.board[a.to], occUnder = occ && occ.under;
+    p.under = null;
+    g.board[a.from] = below;
+    g.board[a.to] = p;
+    if (occ){
+      g.caps[occ.c].push(occ.t);
+      lost.push({ p: occ, at: a.to });
+      if (occUnder){                    /* 落点河格下面压着的子也要算上 */
+        g.caps[occUnder.c].push(occUnder.t);
+        lost.push({ p: occUnder, at: a.to });
+      }
+    }
+    for (var i = 0; i < N; i++){
+      var c = xy(i);
+      if (c.y < 3 || c.y > 5) continue;
+      var top = g.board[i];
+      if (!top) continue;
+      lost.push({ p: kill(g, i), at: i });
+      if (top.under){                     /* 压在河格下面的棋子同样被炸死 */
+        var u = top.under;
+        top.under = null;
+        g.caps[u.c].push(u.t);
+        lost.push({ p: u, at: i });
+      }
+    }
+    events.push({ type: "boom", at: a.to, lost: lost });
+    return events;
+  }
+
   if (a.kind === "press"){
     p.under = q;
     g.board[a.from] = below;
@@ -218,22 +253,6 @@ export function applyMove(g, a){
   if (a.kind === "thirst"){
     var dead = kill(g, a.to, "thirst");
     events.push({ type: "thirst", p: dead, at: a.to });
-  } else if (a.kind === "dive"){
-    var lost = [];
-    for (var i = 0; i < N; i++){
-      var c = xy(i);
-      if (c.y < 3 || c.y > 5) continue;
-      var top = g.board[i];
-      if (!top) continue;
-      lost.push({ p: kill(g, i), at: i });
-      if (top.under){                     /* 压在河格下面的棋子同样被炸死 */
-        var u = top.under;
-        top.under = null;
-        g.caps[u.c].push(u.t);
-        lost.push({ p: u, at: i });
-      }
-    }
-    events.push({ type: "boom", at: a.to, lost: lost });
   }
   return events;
 }

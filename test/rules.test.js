@@ -283,11 +283,13 @@ describe("豹引爆", () => {
     const dv = rules.movesFor(state.getGame(), lp).find(m => m.to === river);
     expect(dv && dv.kind).toBe("dive");
     state.getGame().board[river] = { t: 5, c: "b", rv: true, uid: 88 };
-    /* 一个河格被占，仍可从 (2,3) 扑向另一格空河 */
+    /* 河格被占也照样能扑进去：落点上的棋子随引爆一并阵亡 */
+    expect(rules.movesFor(state.getGame(), lp).some(m => m.to === river && m.kind === "dive")).toBe(true);
     const other = xy2i(3, 4);
     expect(rules.movesFor(state.getGame(), lp).some(m => m.to === other && m.kind === "dive")).toBe(true);
     state.getGame().board[other] = { t: 6, c: "b", rv: true, uid: 89 };
-    expect(rules.movesFor(state.getGame(), lp).some(m => m.kind === "dive")).toBe(false);
+    /* 两个河格都被占，依然可以引爆 */
+    expect(rules.movesFor(state.getGame(), lp).some(m => m.kind === "dive")).toBe(true);
 
     const setup = mk([[lp, LEOPARD], [L, 3], [R, 3]], [[xy2i(2, 3), 1], [xy2i(4, 5), 2], [xy2i(1, 6), 3]]);
     state.setGame(setup);
@@ -302,6 +304,33 @@ describe("豹引爆", () => {
     expect(left).toBe(0);
     expect(state.getGame().caps.r.length > 0 && state.getGame().caps.b.length > 0).toBe(true);
     expect(state.getGame().board[xy2i(1, 6)] && state.getGame().board[xy2i(1, 6)].t).toBe(3);
+  });
+
+  it("河格被占时也能引爆，落点上的子与压着的子一并阵亡", () => {
+    const L = xy2i(1, 4), R = xy2i(4, 4), lp = xy2i(2, 3);
+    const target = xy2i(2, 4), other = xy2i(3, 4);
+    state.setGame(mk(
+      [[lp, LEOPARD], [L, 3], [R, LEOPARD], [target, ELEPHANT]],
+      [[xy2i(4, 5), 2]]
+    ));
+    const G = state.getGame();
+    G.board[target].under = { t: DRAGON, c: "b", rv: true, uid: 99 };
+
+    expect(rules.movesFor(G, lp).some(m => m.to === target && m.kind === "dive")).toBe(true);
+    rules.applyMove(G, { from: lp, to: target, kind: "dive" });
+
+    expect(G.board[target]).toBe(null);
+    expect(G.board[other]).toBe(null);
+    expect(G.board[lp]).toBe(null);
+    /* 落点上的象、被压住的龙，以及爆区内的麒麟都要计入阵亡 */
+    expect(G.caps.r).toEqual(expect.arrayContaining([ELEPHANT, LEOPARD, 3]));
+    expect(G.caps.b).toEqual(expect.arrayContaining([DRAGON, 2]));
+    let left = 0;
+    for (let i = 0; i < N; i++){
+      const y = i2xy(i).y;
+      if (y >= 3 && y <= 5 && G.board[i]) left++;
+    }
+    expect(left).toBe(0);
   });
 });
 

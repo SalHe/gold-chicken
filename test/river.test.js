@@ -86,7 +86,7 @@ describe("河格压子", () => {
     expect(dive && dive.to).toBe(to);
   });
 
-  it("河边陆地格可以跳进任意空河格", () => {
+  it("河边陆地格可以跳进任意河格", () => {
     const bank = xy2i(1, 4), bank2 = xy2i(4, 4);
     const land23 = xy2i(2, 3), land33 = xy2i(3, 3);
     const r24 = xy2i(2, 4), r34 = xy2i(3, 4);
