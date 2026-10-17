@@ -245,6 +245,34 @@ describe("优势残局收束（Demo dmvbz53xwj2t1x 回归）", () => {
   });
 });
 
+describe("单龙残局", () => {
+  it("单龙对单象：借岸固守是必和，不能按子力判负", () => {
+    const g = mk([[xy2i(3, 5), DRAGON]], [[xy2i(4, 2), ELEPHANT]]);
+    expect(ai.evalPos(g, "r")).toBe(0);
+    expect(ai.evalPos(g, "b")).toBe(0);
+  });
+
+  it("单龙能逼杀时直接判胜", () => {
+    const g = mk([[xy2i(2, 3), DRAGON]], [[xy2i(3, 1), ELEPHANT]]);
+    expect(ai.evalPos(g, "r")).toBeGreaterThan(1e6);
+    expect(ai.evalPos(g, "b")).toBeLessThan(-1e6);
+  });
+
+  it("黑麒麟宁可邀兑求和，也不逃象送死", () => {
+    /* (4,2)黑象、(4,3)红麒麟、(4,4)黑麒麟、(3,5)红龙，黑先。
+       兑掉麒麟后是单龙对单象的必和残局；逃象则被红麒麟追死。 */
+    const g = mk(
+      [[xy2i(4, 3), 2], [xy2i(3, 5), DRAGON]],
+      [[xy2i(4, 2), ELEPHANT], [xy2i(4, 4), 2]],
+      { turn: 1 }
+    );
+    const picked = ai.aiPick(g, 1);
+    expect(picked).toMatchObject({
+      from: xy2i(4, 4), to: xy2i(4, 3), kind: "capture"
+    });
+  });
+});
+
 describe("暗棋公平性", () => {
   it("有子阵亡后仍按期望值给翻棋计价，不会为躲负分而乱翻", () => {
     /* Demo dmvcndjxxeuixx 终局：红方只有明金鸡、明象和六枚暗子，

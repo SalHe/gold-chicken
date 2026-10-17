@@ -175,9 +175,134 @@ function canStepTo(list, mvs, target, exceptCell){
   return false;
 }
 
+/* ---------- 单龙残局：精确胜负表 ---------- */
+/* 龙不能踏上「岸」（会渴死），所以单龙对单子时子力价值说明不了胜负：
+   守方可以借岸固守，甚至反过来把龙压在河里（龙方无子可动直接判负）。
+   这里对「一龙 + 一枚非龙/非金鸡棋子」做可达性博弈预计算，得到
+   龙胜 / 守和 / 守胜。只采用「无论谁先走结论都一样」的局面——搜索
+   中的 g.turn 不随节点推进，估值拿不到真正的行棋方。 */
+var SOLO_TABLES = {};
+function soloTable(type){
+  if (SOLO_TABLES[type]) return SOLO_TABLES[type];
+  var P = N * N, d, o, i, j, p;
+  var dNext = new Array(P), oNext = new Array(P);
+  var dWin = new Uint8Array(P), dDraw = new Uint8Array(P), oWin = new Uint8Array(P);
+  function mkSolo(dc, oc){
+    var b = new Array(N).fill(null);
+    b[dc] = { t: DRAGON, c: "r", rv: true, uid: 1 };
+    b[oc] = { t: type, c: "b", rv: true, uid: 2 };
+    return { board: b, turn: 0, pcolor: ["r", "b"], caps: { r: [], b: [] },
+             log: [], firstFlip: true, noCap: 0, pulse: null, result: null };
+  }
+  /* 预生成双方着法，避免在不动点迭代里反复调用 movesFor。 */
+  for (d = 0; d < N; d++){
+    if (isBank(d)) continue;                   /* 龙不可能合法地站在岸上 */
+    for (o = 0; o < N; o++){
+      if (o === d) continue;
+      p = d * N + o;
+      var ms = movesFor(mkSolo(d, o), d), arr = [], to;
+      for (i = 0; i < ms.length; i++){
+        to = ms[i].to;
+        if (ms[i].kind === "thirst"){
+          /* 龙上岸：落点有子则同归于尽（和），空则自己死（守方胜） */
+          if (to === o) dDraw[p] = 1;
+          continue;
+        }
+        if (to === o){ dWin[p] = 1; continue; }  /* 吃子 / 压住（守方困毙） */
+        arr.push(to);
+      }
+      dNext[p] = arr;
+
+      ms = movesFor(mkSolo(d, o), o); arr = [];
+      for (i = 0; i < ms.length; i++){
+        if (ms[i].kind === "press"){ oWin[p] = 1; continue; }  /* 压住龙，龙困毙 */
+        if (ms[i].to === d) continue;
+        arr.push(ms[i].to);
+      }
+      oNext[p] = arr;
+    }
+  }
+  /* DW：龙可强迫取胜；FW：守方可强迫取胜（压住龙）。两者都不在 = 和。 */
+  var DW0 = new Uint8Array(P), DW1 = new Uint8Array(P),
+      FW0 = new Uint8Array(P), FW1 = new Uint8Array(P);
+  var changed = true;
+  while (changed){
+    changed = false;
+    for (d = 0; d < N; d++){
+      if (isBank(d)) continue;
+      for (o = 0; o < N; o++){
+        if (o === d) continue;
+        p = d * N + o;
+        /* 轮到龙 */
+        if (!DW0[p]){
+          var ok = !!dWin[p];
+          for (j = 0; !ok && j < dNext[p].length; j++){
+            if (DW1[dNext[p][j] * N + o]) ok = true;
+          }
+          if (ok){ DW0[p] = 1; changed = true; }
+        }
+        if (!FW0[p] && !dWin[p] && !dDraw[p]){
+          var fall = true;
+          for (j = 0; j < dNext[p].length; j++){
+            if (!FW1[dNext[p][j] * N + o]){ fall = false; break; }
+          }
+          if (fall){ FW0[p] = 1; changed = true; }
+        }
+        /* 轮到守方 */
+        if (!DW1[p] && !oWin[p]){
+          var all = true;
+          for (j = 0; j < oNext[p].length; j++){
+            if (!DW0[d * N + oNext[p][j]]){ all = false; break; }
+          }
+          if (all){ DW1[p] = 1; changed = true; }
+        }
+        if (!FW1[p]){
+          var fok = !!oWin[p];
+          for (j = 0; !fok && j < oNext[p].length; j++){
+            if (FW0[d * N + oNext[p][j]]) fok = true;
+          }
+          if (fok){ FW1[p] = 1; changed = true; }
+        }
+      }
+    }
+  }
+  var st = new Int8Array(P);                   /* 1 龙胜 / -1 守胜 / 0 和 / 2 视行棋方 */
+  for (p = 0; p < P; p++){
+    var dw = DW0[p] && DW1[p], fw = FW0[p] && FW1[p];
+    var none = !DW0[p] && !DW1[p] && !FW0[p] && !FW1[p];
+    st[p] = (dw && !fw) ? 1 : ((fw && !dw) ? -1 : (none ? 0 : 2));
+  }
+  SOLO_TABLES[type] = st;
+  return st;
+}
+/* 纯双子残局（一龙 + 一枚非龙/非金鸡棋子）直接查表；其它局面返回 null。 */
+function soloDragonScore(g, col){
+  var cells = [], i, p;
+  for (i = 0; i < N; i++){
+    p = g.board[i];
+    if (!p) continue;
+    if (!p.rv || p.under) return null;         /* 还有暗子 / 压子，不适用 */
+    cells.push(i);
+    if (cells.length > 2) return null;
+  }
+  if (cells.length !== 2) return null;
+  var a = g.board[cells[0]], b = g.board[cells[1]];
+  var dc, oc, ot, dragonColor;
+  if (a.t === DRAGON && b.t !== DRAGON){ dc = cells[0]; oc = cells[1]; ot = b.t; dragonColor = a.c; }
+  else if (b.t === DRAGON && a.t !== DRAGON){ dc = cells[1]; oc = cells[0]; ot = a.t; dragonColor = b.c; }
+  else return null;
+  if (ot === ROOSTER || a.c === b.c || isBank(dc)) return null;
+  var st = soloTable(ot)[dc * N + oc];
+  if (st === 2) return null;                   /* 取决于谁先走，交回常规估值 */
+  if (st === 0) return 0;
+  return (st > 0) === (dragonColor === col) ? WIN : -WIN;
+}
+
 /* ---------- 估值 ---------- */
 /* 只依据「已翻开」的信息估值（暗棋身份不参与任何计算） */
 export function evalPos(g, col){
+  var solo = soloDragonScore(g, col);
+  if (solo !== null) return solo;
   var opp = otherColor(col);
   var mine = [], theirs = [], mvs = {}, kindAt = {}, i, p;
   var myMat = 0, opMat = 0, totalPieces = 0;
