@@ -757,7 +757,9 @@ function expectedFlip(g, pi, cell, pool){
     var c = g2.board[cell];
     c.c = pool[i].c; c.t = pool[i].t; c.rv = true;
     var t = terminalScore(g2, pi);
-    sum += (t !== null) ? t : evalPos(g2, col);
+    if (t !== null){ sum += t; continue; }
+    var q = oppBestCapture(g2, 1 - pi, col);
+    sum += (q !== null) ? q : evalPos(g2, col);
   }
   return sum / pool.length;
 }
@@ -787,6 +789,46 @@ function applyAction(g, a){
   }
   g.noCap = ate ? 0 : (g.noCap || 0) + 1;
   return ate;
+}
+/* ---------- 一步兑现：只按公开信息预演对手的吃子 ---------- */
+/* 我方走完一手、轮到对手时，枚举对手「已翻开」棋子中净赚（attackGain > 0）
+   的吃子，取兑现后对我方最不利的一手的分。暗子不能吃子，因此这里不读取
+   任何暗子的颜色或身份；没有可兑现的吃子时返回 null。
+   用途：一步估值若只把对手的反吃记成「威胁」，会低估「现在吃一个、
+   下一手被白吃一个更大的」这类兑子。 */
+function oppBestCapture(g, oppPi, col){
+  var opp = g.pcolor[oppPi];
+  var bl = blockadeColor(g), best = null, i, k;
+  for (i = 0; i < N; i++){
+    var p = g.board[i];
+    if (!p || !p.rv || p.c !== opp) continue;
+    var ms = movesFor(g, i), km = {};
+    for (k = 0; k < ms.length; k++) km[ms[k].to] = ms[k].kind;
+    var ctx = { kindAt: {}, mvs: {}, bl: bl, dive: { r: false, b: false } };
+    ctx.kindAt[i] = km;
+    for (k = 0; k < ms.length; k++){
+      var a = ms[k];
+      if (a.kind !== "capture") continue;
+      var q = g.board[a.to];
+      if (!q || !q.rv || q.c !== col) continue;
+      if (attackGain(g, i, a.to, ctx) <= 0) continue;
+      var g2 = cloneG(g);
+      applyAction(g2, a);
+      var t = terminalScore(g2, oppPi);
+      var sc = (t !== null) ? -t : evalPos(g2, col);
+      if (best === null || sc < best) best = sc;
+    }
+  }
+  return best;
+}
+/* 我方走完一手后的估分：先让对手兑现最赚的一手吃子，再静态估值。 */
+function onePlyScore(g, pi, act, col){
+  var g2 = cloneG(g);
+  applyAction(g2, act);
+  var t = terminalScore(g2, pi);
+  if (t !== null) return t;
+  var q = oppBestCapture(g2, 1 - pi, col);
+  return q !== null ? q : evalPos(g2, col);
 }
 /* 着法排序：吃子、压子优先，让 alpha-beta 尽早剪枝 */
 function orderActions(g, acts){
@@ -959,10 +1001,7 @@ export function aiPick(g, pi, opts){
                                  : evalPos(g, col);
         sc += Math.random() * 0.3;
       } else {
-        var g2 = cloneG(g);
-        applyAction(g2, act);
-        var t = terminalScore(g2, pi);
-        sc = (t !== null) ? t : evalPos(g2, col);
+        sc = onePlyScore(g, pi, act, col);
         sc += Math.random() * 0.05;
       }
       scored.push({ a: act, sc: sc });

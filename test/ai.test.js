@@ -385,3 +385,45 @@ describe("暗棋公平性", () => {
     expect(a1).toEqual(a2);
   });
 });
+
+describe("对手兑现反吃（两步估值）", () => {
+  it("黑麒麟不会离岸吃狮换龙（Demo dmvcpces8wbmd0）", () => {
+    /* 黑麒麟在岸上，吃红狮后必然被红龙反吃；留在岸上则狮、虎、鼠
+       都啃不动它，只有同级麒麟能兑。一步静态分只把反吃算成 0.55
+       的威胁权重，于是「吃狮」反而更划算。这里仍然只用公开信息：
+       对手的反吃只从已翻开的棋子枚举，暗子不参与。 */
+    const reds = [
+      [xy2i(1, 2), DRAGON], [xy2i(1, 3), 3], [xy2i(3, 3), RAT], [xy2i(4, 4), 5]
+    ];
+    const blacks = [[xy2i(1, 4), 2]];
+    [0, 1, 2, 3, 5, 6].forEach((cell, k) => {
+      reds.push([cell, [2, 4, 6, 9, 10, 12][k], false]);
+    });
+    [7, 9, 11, 20, 21, 22, 23, 24, 25, 26, 27].forEach((cell, k) => {
+      blacks.push([cell, [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12][k], false]);
+    });
+    const g = mk(reds, blacks, {
+      pcolor: ["r", "b"], turn: 1, caps: { r: [8, 7], b: [] }, noCap: 1
+    });
+    const picked = ai.aiPick(g, 1, { deterministic: true });
+    expect(picked.kind).toBe("flip");
+  });
+
+  it("黑金鸡不会为了吃豹而被狼白吃（Demo dmvcq6hycvaizs）", () => {
+    /* 黑虎吃红豹后，红狼立刻白吃黑金鸡；而黑猫吃不动狼，无法反吃。
+       正确的选择是让金鸡飞走自保。 */
+    const g = mk(
+      [[xy2i(4, 1), 6], [xy2i(1, 3), ROOSTER], [xy2i(1, 4), 2],
+       [xy2i(3, 4), DRAGON], [xy2i(4, 4), 3], [xy2i(2, 5), RAT],
+       [xy2i(4, 6), 7], [xy2i(2, 1), 9, false]],
+      [[xy2i(4, 2), 5], [xy2i(2, 4), DRAGON], [xy2i(1, 6), 2],
+       [xy2i(3, 7), 10], [xy2i(4, 7), ROOSTER],
+       [xy2i(3, 1), 6, false], [xy2i(3, 6), 8, false]],
+      { pcolor: ["b", "r"], turn: 0, caps: { r: [4, 8, 5, 10], b: [3, 7, 11, 9] }, noCap: 6 }
+    );
+    g.board[xy2i(3, 4)].under = { t: ELEPHANT, c: "b", rv: true, uid: 99 };
+    const picked = ai.aiPick(g, 0, { deterministic: true });
+    expect(picked.from).toBe(xy2i(4, 7));
+    expect(picked.kind).toBe("move");
+  });
+});
