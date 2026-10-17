@@ -100,6 +100,13 @@ describe("河格压子", () => {
     expect(rules.movesFor(state.getGame(), land33)
       .filter(m => m.kind === "dive").map(m => m.to).sort())
       .toEqual([r24, r34].sort());
+    /* 河另一侧的 (2,5)、(3,5) 同样可以任选河格 */
+    [xy2i(2, 5), xy2i(3, 5)].forEach(function(lp){
+      state.setGame(mk([[lp, LEOPARD], [bank, 3], [bank2, 3]], []));
+      expect(rules.movesFor(state.getGame(), lp)
+        .filter(m => m.kind === "dive").map(m => m.to).sort())
+        .toEqual([r24, r34].sort());
+    });
     /* 不紧挨河界的陆地豹没有这条着法 */
     const far = xy2i(1, 2);
     state.setGame(mk([[far, LEOPARD], [bank, 3], [bank2, 3]], []));
