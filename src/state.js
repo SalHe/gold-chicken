@@ -2,7 +2,7 @@
 import { N } from "./constants.js";
 import {
   xy, isRiver, isBank, shuffle, posName, pname,
-  counts, deadPosition, allActions, applyMove
+  counts, deadPosition, allActions, applyMove, positionKey
 } from "./rules.js";
 
 let game = null;
@@ -11,10 +11,13 @@ let aiFirst = false;
 let changed = null;
 /* 本局的起点与走子序列（供 Demo 存储/回放）；undoStack 与 actions 一一对应 */
 let baseSnapshot = null, actions = [];
+/* 依次走过的公开局面键（含起点），供 AI 识别重复局面 */
+let posHistory = [];
 /* 回放态：replay = { list, idx }；savedState 记住回放前的对局，退出时原样恢复 */
 let replay = null, savedState = null;
 
 function notify(reset){ if (changed) changed(reset); }
+function rememberPos(){ if (game) posHistory.push(positionKey(game)); }
 
 /* ---------- 访问器（setGame/setSel 等供测试注入摆局与点击态） ---------- */
 export function getGame(){ return game; }
@@ -22,6 +25,7 @@ export function setGame(g){
   game = g;
   actions = [];
   undoStack = [];
+  posHistory = [positionKey(g)];
   baseSnapshot = JSON.stringify({ g: g, uid: uidSeq });
 }
 export function getSel(){ return sel; }
@@ -37,6 +41,8 @@ export function getAiFirst(){ return aiFirst; }
 export function setAiFirst(v){ aiFirst = !!v; }
 export function getActions(){ return actions; }
 export function getBaseSnapshot(){ return baseSnapshot; }
+/* 近期公开局面（含当前局面）；AI 用它避开重复、原地兜圈 */
+export function getPositionHistory(){ return posHistory.slice(); }
 export function isReplaying(){ return !!replay; }
 export function getReplayInfo(){ return replay ? { idx: replay.idx, total: replay.list.length } : null; }
 export function setChanged(fn){ changed = fn; }
@@ -69,6 +75,7 @@ export function newGame(){
   };
   sel = -1; curMoves = []; armed = -1; undoStack = []; actions = [];
   say("s", "开局。先手请翻棋，翻出的颜色即先手方阵营。");
+  posHistory = [positionKey(game)];
   baseSnapshot = snapshot();
   notify(true);
 }
@@ -85,6 +92,7 @@ export function restore(json, keepStack){
     sel = -1; curMoves = []; armed = -1;
     if (!keepStack){
       undoStack = []; actions = [];
+      posHistory = [positionKey(game)];
       baseSnapshot = json;
     }
     notify(true);
@@ -184,6 +192,7 @@ export function commit(a){
   if (a.kind === "flip") doFlip(a.i, game.turn);
   else doMove(a, game.turn);
   endTurn();
+  rememberPos();
 }
 /* 悔棋 n 手：悔棋栈与走子序列同步回退，栈本身保留，因此可以一直悔下去 */
 export function undo(n){
@@ -193,6 +202,7 @@ export function undo(n){
   while (k < count && undoStack.length){ s = undoStack.pop(); actions.pop(); k++; }
   if (!s) return false;
   restore(s, true);
+  posHistory.length = Math.max(1, posHistory.length - k);
   return true;
 }
 export function say(cls, html){
@@ -237,11 +247,13 @@ export function beginReplay(startJson, list){
       game: snapshot(),
       undoStack: undoStack.slice(),
       actions: actions.slice(),
+      posHistory: posHistory.slice(),
       base: baseSnapshot
     };
     game = o.g; uidSeq = o.uid || uidSeq;
     baseSnapshot = startJson;
     undoStack = []; actions = [];
+    posHistory = [positionKey(game)];
     replay = { start: startJson, list: list.slice(), idx: 0 };
     sel = -1; curMoves = []; armed = -1;
     notify(true);
@@ -270,6 +282,7 @@ function applyReplayAction(a, step){
   }
   game.turn = 1 - game.turn;
   checkResult();
+  rememberPos();
 }
 
 /* 走一步回放。返回 false 表示已播完或记录不合法（不合法时直接退出回放）。 */
@@ -297,6 +310,7 @@ export function replayGoto(n){
   try{ o = JSON.parse(replay.start); }catch(e){ return false; }
   if (!o || !o.g || !o.g.board) return false;
   game = o.g; uidSeq = o.uid || uidSeq;
+  posHistory = [positionKey(game)];
   for (var i = 0; i < target; i++){
     var a = replay.list[i];
     var acts = allActions(game, game.turn), ok = false;
@@ -336,6 +350,7 @@ export function endReplay(){
     }catch(e){}
     undoStack = savedState.undoStack;
     actions = savedState.actions;
+    posHistory = savedState.posHistory || [positionKey(game)];
     baseSnapshot = savedState.base;
     savedState = null;
   }

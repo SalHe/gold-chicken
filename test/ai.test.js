@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import { N, DRAGON, ELEPHANT, LEOPARD, ROOSTER, VAL } from "../src/constants.js";
 import * as rules from "../src/rules.js";
 import * as ai from "../src/ai.js";
+import * as state from "../src/state.js";
 import { mk, xy2i } from "./helpers/factory.js";
 
 const RAT = 11;
@@ -96,7 +97,8 @@ describe("龙、金鸡与河界", () => {
 
   it("AI 会把被金鸡盯上的龙挪进河里", () => {
     const g = mk([[xy2i(2, 3), DRAGON]], [[xy2i(4, 7), ROOSTER]]);
-    expect(ai.aiPick(g, 0).to).toBe(xy2i(2, 4));
+    /* 两个河格都安全；龙还可以斜着下河，落哪一格由估值决定 */
+    expect(rules.isRiver(ai.aiPick(g, 0).to)).toBe(true);
   });
 
   it("堵岸把敌方金鸡挡在河界另一侧时，己方龙更安全", () => {
@@ -112,6 +114,33 @@ describe("龙、金鸡与河界", () => {
     const inZone = mk(reds, [[xy2i(4, 5), DRAGON], [xy2i(3, 5), ELEPHANT]]);
     const outside = mk(reds, [[xy2i(4, 6), DRAGON], [xy2i(3, 6), ELEPHANT]]);
     expect(ai.evalPos(inZone, "r")).toBeGreaterThan(ai.evalPos(outside, "r") + 15);
+  });
+});
+
+describe("优势残局收束（Demo dmvbz53xwj2t1x 回归）", () => {
+  /* 这盘 Demo 在第 118 手时黑方多出龙、麒麟、狮、虎、狸、鼠，
+     却因为 AI 原地兜圈，最终连续 60 手无吃子判和。现在要求：
+     同样的局面、同样的确定性 AI 对弈，黑方必须把优势兑现成胜利。 */
+  it("黑方不会再把必胜残局走成和棋", () => {
+    const g = mk(
+      [[7, 4], [8, 3]],                                   /* 红象、红狮 */
+      [[6, 9], [10, 1], [11, 11], [12, 3], [15, 5], [18, 2]], /* 狸、龙、鼠、狮、虎、麒麟 */
+      { turn: 0, noCap: 45 }
+    );
+    state.setGame(g);
+    let plies = 0;
+    while (!state.getGame().result && plies < 200){
+      const cur = state.getGame();
+      const a = ai.aiPick(cur, cur.turn, {
+        history: state.getPositionHistory(),
+        deterministic: true
+      });
+      expect(a).not.toBe(null);
+      state.commit(a);
+      plies++;
+    }
+    const result = state.getGame().result;
+    expect(result).toMatchObject({ kind: "win", winner: "b" });
   });
 });
 

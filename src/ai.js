@@ -8,10 +8,33 @@
 import { N, W, H, DRAGON, ELEPHANT, LEOPARD, ROOSTER, VAL } from "./constants.js";
 import {
   xy, id, movesFor, allActions, applyMove, counts, canEat, blockadeColor,
-  deadPosition, isRiver, isBank, touchesRiver, crossesRiver
+  deadPosition, isRiver, isBank, touchesRiver, crossesRiver, positionKey
 } from "./rules.js";
 
-export function cloneG(g){ return JSON.parse(JSON.stringify(g)); }
+/* 快速深拷贝：只复制对局所需字段。搜索里会克隆成千上万个节点，
+   JSON 序列化的开销太大；棋子对象也没有多余字段需要保留。 */
+export function cloneG(g){
+  var board = new Array(N), i, p, q;
+  for (i = 0; i < N; i++){
+    p = g.board[i];
+    if (!p){ board[i] = null; continue; }
+    q = { uid: p.uid, t: p.t, c: p.c, rv: p.rv, under: null };
+    if (p.under) q.under = { uid: p.under.uid, t: p.under.t, c: p.under.c, rv: p.under.rv };
+    board[i] = q;
+  }
+  return {
+    board: board,
+    turn: g.turn,
+    pcolor: [g.pcolor[0], g.pcolor[1]],
+    noCap: g.noCap,
+    firstFlip: g.firstFlip,
+    result: g.result,
+    last: g.last,
+    caps: { r: g.caps.r.slice(), b: g.caps.b.slice() },
+    log: g.log,
+    pulse: g.pulse
+  };
+}
 
 export function adjacentCount(g, i){
   var c = xy(i), n = 0, dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -135,11 +158,13 @@ function otherColor(c){ return c === "r" ? "b" : "r"; }
 export function evalPos(g, col){
   var opp = otherColor(col);
   var mine = [], theirs = [], mvs = {}, kindAt = {}, i, p;
-  var myMat = 0, opMat = 0;
+  var myMat = 0, opMat = 0, totalPieces = 0;
 
   for (i = 0; i < N; i++){
     p = g.board[i];
-    if (!p || !p.rv) continue;
+    if (!p) continue;
+    totalPieces++;
+    if (!p.rv) continue;
     if (p.c === col){ mine.push(i); myMat += VAL[p.t]; }
     else { theirs.push(i); opMat += VAL[p.t]; }
     mvs[i] = movesFor(g, i);
@@ -193,8 +218,10 @@ export function evalPos(g, col){
     else if (p.t === ROOSTER) opRooster = theirs[i];
   }
 
-  /* 威胁：区分吃子 / 邀兑 / 压子 / 渴死，并考虑目标有无保护 */
-  var a, b;
+  /* 威胁：区分吃子 / 邀兑 / 压子 / 渴死，并考虑目标有无保护。
+     对手「亏子」的攻击不是威胁（它不会走），不能倒过来给我加分——
+     否则把自己的子摆在对手嘴边当诱饵反而成了收益，还会阻碍腾挪。 */
+  var a, b, gain;
   for (a = 0; a < mine.length; a++){
     for (b = 0; b < theirs.length; b++){
       s += W_MY_THREAT * attackGain(g, mine[a], theirs[b], ctx);
@@ -202,7 +229,8 @@ export function evalPos(g, col){
   }
   for (a = 0; a < theirs.length; a++){
     for (b = 0; b < mine.length; b++){
-      s -= W_OPP_THREAT * attackGain(g, theirs[a], mine[b], ctx);
+      gain = attackGain(g, theirs[a], mine[b], ctx);
+      if (gain > 0) s -= W_OPP_THREAT * gain;
     }
   }
 
@@ -225,11 +253,67 @@ export function evalPos(g, col){
     }
   }
 
+  /* 无吃子手数逼近上限：领先方必须主动收束，否则判和等于输。
+     吃子会把 noCap 归零，因此这一项会自然把 AI 推向能兑现的着法。 */
+  var lead = myMat - opMat;
+  if (g.noCap >= 40 && lead > 0){
+    s -= (g.noCap - 40) * (0.35 + Math.min(lead, 300) / 300);
+  }
+
+  /* 领先时的简化奖励：子力越少，优势越难被翻盘。
+     落后方在同一局面里得到相反的符号，双方对「兑子」的判断一致。 */
+  if (lead > 50) s += (24 - totalPieces) * 0.5;
+
+  /* 追猎梯度：领先时对手往往只剩一两枚子，距离本身就是进展。
+     只奖励「对方占不到便宜」的己方子接近目标：被目标白吃不算追猎，
+     同阶邀兑在领先时可以接受。距离越近分越高，避免来回摆动。 */
+  if (lead > 50 && theirs.length){
+    var prox = 0;
+    for (i = 0; i < mine.length; i++){
+      var mp = g.board[mine[i]], nd = 99;
+      if (mp.t === ROOSTER) continue;               /* 金鸡不受距离限制 */
+      for (var hj = 0; hj < theirs.length; hj++){
+        var hq = g.board[theirs[hj]];
+        if (!canEat(mp, hq) || hq.t < mp.t) continue;
+        var hd = Math.abs(xy(mine[i]).x - xy(theirs[hj]).x) +
+                 Math.abs(xy(mine[i]).y - xy(theirs[hj]).y);
+        if (hd < nd) nd = hd;
+      }
+      if (nd === 1) prox += 14;
+      else if (nd === 2) prox += 4;
+      else if (nd === 3) prox += 1.5;
+    }
+    s += prox * Math.min(lead, 300) / 300;
+  }
+
   /* 机动性：金鸡的全盘飞行也会体现在这里 */
   var myMob = 0, opMob = 0;
   for (i = 0; i < mine.length; i++) myMob += Math.min(mvs[mine[i]].length, 20);
   for (i = 0; i < theirs.length; i++) opMob += Math.min(mvs[theirs[i]].length, 20);
   s += (myMob - opMob) * 0.3;
+
+  /* 准备着法的价值：下一步能走到某个敌子旁边（再下一步可吃），
+     这类「逼近威胁」不直接兑现，却正是清障、包抄、追猎的组成部分。
+     只计目前还吃不到的目标，避免与上面的即时威胁重复；无吃子手数
+     逼近 60 时逐步加权，逼 AI 在判和之前收束。 */
+  var pot = 0.10 * (1 + Math.min(g.noCap || 0, 60) / 60);
+  for (i = 0; i < mine.length; i++){
+    var ap = g.board[mine[i]], want = null;
+    for (var wk = 0; wk < mvs[mine[i]].length; wk++){
+      var wm = mvs[mine[i]][wk];
+      if (wm.kind === "dive" || wm.kind === "thirst" || wm.kind === "self") continue;
+      var nb = NEI[wm.to];
+      for (var wn = 0; wn < nb.length; wn++){
+        var wq = g.board[nb[wn]];
+        if (!wq || !wq.rv || wq.c === col) continue;
+        if (kindAt[mine[i]] && kindAt[mine[i]][nb[wn]] === "capture") continue;
+        if (!canEat(ap, wq)) continue;
+        if (!want) want = {};
+        want[nb[wn]] = VAL[wq.t];
+      }
+    }
+    if (want) for (var wj in want) s += pot * want[wj];
+  }
 
   /* 位置：贴河更活；河中是安全屋——河中子不会被吃（只能被压），
      尤其龙进河后，敌方金鸡再也够不到它。敌方堵岸会把河中子冰封，
@@ -267,7 +351,28 @@ export function evalPos(g, col){
       if (rp.rv && rp.c !== bl) frozen += VAL[rp.t];
       if (rp.under && rp.under.c !== bl) frozen += VAL[rp.under.t];
     }
-    var bv = 45 + 0.3 * frozen;
+    /* 堵岸的基础价值按局面调整：双岸免疫本身值钱，但它的主要意义
+       在于「冻住河中敌子」和「拦住敌方金鸡」。没有这两样时价值打折；
+       己方在河边堆子堵住龙的入水口，则还要再扣。 */
+    var bv = 30 + 0.3 * frozen;
+    if (bl === col){
+      if (opRooster >= 0) bv += 8;
+      if (myDragon >= 0 && !isRiver(myDragon) && opRooster >= 0){
+        var freeEntrances = 0;
+        for (i = 0; i < N; i++){
+          if (!touchesRiver(i) || isRiver(i) || g.board[i]) continue;
+          freeEntrances++;
+        }
+        if (freeEntrances < 2) bv -= 8;     /* 自己的子堵住了龙的入水路线 */
+      }
+    } else if (myRooster >= 0){
+      bv += 8;
+    }
+    var ownRiverland = 0;
+    for (i = 0; i < mine.length; i++){
+      if (!isBank(mine[i]) && touchesRiver(mine[i])) ownRiverland++;
+    }
+    if (ownRiverland >= 3) bv -= 6;          /* 河岸拥堵：拦了别人，也拦了自己 */
     if (ctx.dive[otherColor(bl)]) bv *= 0.55;   /* 对方随时可以炸掉堵岸 */
     /* 堵岸的另一个用处：把敌方金鸡拦在河界另一侧，己方龙才真正安全 */
     if (bl === col && myDragon >= 0 && opRooster >= 0 && !isRiver(myDragon)){
@@ -349,6 +454,118 @@ function expectedFlip(g, pi, cell, pool){
   return sum / pool.length;
 }
 
+/* ---------- 残局搜索 ---------- */
+/* 暗棋身份不可读，翻棋只能按期望值计价，因此搜索只在全盘翻开后进行。
+   搜索按节点预算截断，不依赖真实时间，测试与对局都可复现。 */
+const SEARCH_INF = 1e9;
+const NODE_BUDGET = 6000;
+const SEARCH_MAX_PIECES = 8;    /* 只在中残局搜索；开局子多，一步评估已足够 */
+
+function hasHidden(g){
+  for (var i = 0; i < N; i++) if (g.board[i] && !g.board[i].rv) return true;
+  return false;
+}
+function pieceCount(g){
+  var n = 0;
+  for (var i = 0; i < N; i++) if (g.board[i]) n++;
+  return n;
+}
+/* 在克隆局面上走一步，并同步无吃子计数（与 state.doMove 的语义一致） */
+function applyAction(g, a){
+  var ev = applyMove(g, a), ate = false;
+  for (var i = 0; i < ev.length; i++){
+    var t = ev[i].type;
+    if (t === "eat" || t === "trade" || t === "thirst" || t === "boom"){ ate = true; break; }
+  }
+  g.noCap = ate ? 0 : (g.noCap || 0) + 1;
+  return ate;
+}
+/* 着法排序：吃子、压子优先，让 alpha-beta 尽早剪枝 */
+function orderActions(g, acts){
+  var arr = [], i, a, d, p, pr;
+  for (i = 0; i < acts.length; i++){
+    a = acts[i]; pr = 0;
+    if (a.kind === "flip"){ pr = -1; }
+    else {
+      d = g.board[a.to]; p = g.board[a.from];
+      if (a.kind === "dive") pr = 1;
+      else if (a.kind === "thirst") pr = p ? -VAL[p.t] : 0;
+      else if (a.kind === "press") pr = d ? 0.5 * VAL[d.t] : 0;
+      else if (d && d.rv && p) pr = VAL[d.t];
+    }
+    arr.push({ a: a, pr: pr, i: i });
+  }
+  arr.sort(function(x, y){ return (y.pr - x.pr) || (x.i - y.i); });
+  var out = [];
+  for (i = 0; i < arr.length; i++) out.push(arr[i].a);
+  return out;
+}
+/* 搜到判和时的回退分：和棋本身价值相同，但用一层很薄的位置分打破平局，
+   避免「所有着法都判和」时随机乱走，把最后的实战机会也丢掉。 */
+function drawScore(g, col){ return 1e-3 * evalPos(g, col); }
+
+/* 极小化极大：返回值始终从 col（AI 一方）的视角计分。 */
+function searchNode(g, pi, depth, col, alpha, beta, nodes){
+  nodes.n++;
+  var color = g.pcolor[pi];
+  var opp = otherColor(color);
+  var cnt = counts(g);
+  if (cnt[opp] === 0) return color === col ? WIN : -WIN;
+  if (cnt[color] === 0) return color === col ? -WIN : WIN;
+  if (g.noCap >= 60 || deadPosition(g)) return drawScore(g, col);
+  if (depth <= 0 || nodes.n >= nodes.max) return evalPos(g, col);
+  var acts = allActions(g, pi);
+  if (!acts.length) return color === col ? -WIN : WIN;   /* 困毙 */
+  var maxing = color === col;
+  var best = maxing ? -SEARCH_INF : SEARCH_INF;
+  var ordered = orderActions(g, acts);
+  for (var i = 0; i < ordered.length; i++){
+    var g2 = cloneG(g);
+    applyAction(g2, ordered[i]);
+    var v = searchNode(g2, 1 - pi, depth - 1, col, alpha, beta, nodes);
+    if (maxing){
+      if (v > best) best = v;
+      if (best > alpha) alpha = best;
+    } else {
+      if (v < best) best = v;
+      if (best < beta) beta = best;
+    }
+    if (beta <= alpha) break;
+  }
+  return best;
+}
+/* 根节点逐层加深；某一层超出节点预算就沿用上一层的完整结果。
+   根节点共享 alpha：第一个（上一层的）最优着法先搜，其余着法一旦
+   不可能超过当前最优就快速剪掉。 */
+function rootSearch(g, pi, maxDepth, budget){
+  var col = g.pcolor[pi];
+  var acts = allActions(g, pi);
+  var best = null;
+  for (var d = 1; d <= maxDepth; d++){
+    var nodes = { n: 0, max: budget };
+    var cur = [], complete = true, alpha = -SEARCH_INF, i, a, g2, sc;
+    for (i = 0; i < acts.length; i++){
+      a = acts[i];
+      if (a.kind === "flip"){ complete = false; break; }
+      g2 = cloneG(g);
+      applyAction(g2, a);
+      sc = searchNode(g2, 1 - pi, d - 1, col, alpha, SEARCH_INF, nodes);
+      if (sc > alpha) alpha = sc;
+      cur.push({ a: a, sc: sc });
+      if (nodes.n >= budget && i < acts.length - 1){ complete = false; break; }
+    }
+    if (!complete) break;
+    best = cur;
+    if (nodes.n >= budget) break;
+    /* 下一层按本层分数排序：最有希望的着法先搜，剪枝更早生效 */
+    var sorted = cur.slice().sort(function(x, y){ return y.sc - x.sc; });
+    var next = [];
+    for (i = 0; i < sorted.length; i++) next.push(sorted[i].a);
+    acts = next;
+  }
+  return best;
+}
+
 /* ---------- 选着 ---------- */
 /* 先手尚未定色：只在中路附近翻棋（翻出的颜色即先手方阵营，位置决定后续机动）。 */
 function pickOpeningFlip(acts){
@@ -361,42 +578,94 @@ function pickOpeningFlip(acts){
   return best;
 }
 
-export function aiPick(g, pi){
+/* opts:
+     depth         搜索深度上限（默认按棋子数取 3 或 2；1 表示只做一步评估）
+     budget        搜索节点预算（默认 NODE_BUDGET）
+     history       最近对局的公开局面键数组（重复局面惩罚，可含当前局面）
+     deterministic true 时不做随机取样，稳定返回最优着 */
+export function aiPick(g, pi, opts){
   if (!g || !g.pcolor) return null;
   var col = g.pcolor[pi];
   var acts = allActions(g, pi);
   if (!acts.length) return null;
   if (!col) return pickOpeningFlip(acts);
 
+  opts = opts || {};
+  var budget = opts.budget || NODE_BUDGET;
+  var maxDepth = opts.depth || (pieceCount(g) <= 8 ? (g.noCap >= 25 ? 4 : 3) : 2);
   var pool = hiddenPool(g);
-  var scored = [], i;
+  var scored = [], i, act, sc;
 
+  /* 一步制胜就直接兑现：搜索能算出「三步后必胜」，
+     但有立即结束的着法时没有理由再兜圈子。 */
+  var instant = [];
   for (i = 0; i < acts.length; i++){
-    var act = acts[i], sc;
-    if (act.kind === "flip"){
-      sc = pool && pool.length ? expectedFlip(g, pi, act.i, pool)
-                               : 1.2 + Math.random() * 1.0;
-      sc += Math.random() * 0.3;
-    } else {
-      var g2 = cloneG(g);
-      var ev = applyMove(g2, act);
-      var ate = false;
-      for (var k = 0; k < ev.length; k++){
-        var et = ev[k].type;
-        if (et === "eat" || et === "trade" || et === "thirst" || et === "boom"){ ate = true; break; }
-      }
-      g2.noCap = ate ? 0 : (g.noCap || 0) + 1;
-      var t = terminalScore(g2, pi);
-      sc = (t !== null) ? t : evalPos(g2, col);
-      sc += Math.random() * 0.05;
-    }
-    scored.push({ a: act, sc: sc });
+    act = acts[i];
+    if (act.kind === "flip") continue;
+    var wg = cloneG(g);
+    applyAction(wg, act);
+    if (terminalScore(wg, pi) === WIN) instant.push(act);
+  }
+  if (instant.length) return instant[Math.random() * instant.length | 0];
+
+  /* 全盘翻开后的中残局做浅层搜索，把「准备着法」的后续收益算进来。
+     只要还有暗子，就退回一步期望估值——搜索树里不能偷看暗子身份。 */
+  var searched = null;
+  if (!hasHidden(g) && pieceCount(g) <= SEARCH_MAX_PIECES && maxDepth >= 2){
+    searched = rootSearch(g, pi, maxDepth, budget);
   }
 
-  /* 在「近似最优」里随机挑一个：保留变化，但不再被噪声带偏 */
+  if (searched){
+    scored = searched;
+  } else {
+    for (i = 0; i < acts.length; i++){
+      act = acts[i];
+      if (act.kind === "flip"){
+        sc = pool && pool.length ? expectedFlip(g, pi, act.i, pool)
+                                 : 1.2 + Math.random() * 1.0;
+        sc += Math.random() * 0.3;
+      } else {
+        var g2 = cloneG(g);
+        applyAction(g2, act);
+        var t = terminalScore(g2, pi);
+        sc = (t !== null) ? t : evalPos(g2, col);
+        sc += Math.random() * 0.05;
+      }
+      scored.push({ a: act, sc: sc });
+    }
+  }
+
+  /* 重复局面惩罚：优势方最忌讳在残局里来回兜圈，
+     同一公开局面在近期出现过就扣分（只回看最近 16 个局面）。 */
+  var history = opts.history;
+  if (history && history.length){
+    for (i = 0; i < scored.length; i++){
+      act = scored[i].a;
+      if (act.kind === "flip") continue;
+      var hg = cloneG(g);
+      applyAction(hg, act);
+      var key = positionKey(hg), hits = 0;
+      for (var h = history.length - 1; h >= 0 && h >= history.length - 16; h--){
+        if (history[h] === key) hits++;
+      }
+      if (hits) scored[i].sc -= 6 * hits;
+    }
+  }
+
+  if (!scored.length) return null;
   var max = -Infinity;
   for (i = 0; i < scored.length; i++) if (scored[i].sc > max) max = scored[i].sc;
-  var margin = max >= WIN ? 0 : 0.8;
+
+  if (opts.deterministic){
+    var best = scored[0];
+    for (i = 1; i < scored.length; i++) if (scored[i].sc > best.sc) best = scored[i];
+    return best.a;
+  }
+
+  /* 在「近似最优」里随机挑一个：保留变化，但不再被噪声带偏。
+     判和/败势的分数很小（来自 drawScore），此时不给随机余量，
+     让位置分真正起到打破平局的作用。 */
+  var margin = (max >= WIN || max < 1) ? 0 : 0.8;
   var top = [];
   for (i = 0; i < scored.length; i++) if (scored[i].sc >= max - margin) top.push(scored[i].a);
   return top[Math.random() * top.length | 0];

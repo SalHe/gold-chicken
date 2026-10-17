@@ -20,6 +20,19 @@ export function touchesRiver(i){
 }
 export function pname(p){ return NUM[p.t] + NAME[p.t]; }
 export function posName(i){ var c = xy(i); return "(" + c.x + "," + c.y + ")"; }
+/* 只含公开信息的局面键：暗子的颜色与身份都不可见，一律记为「?」。
+   用于重复局面检测，不会泄露任何暗棋信息。 */
+export function positionKey(g){
+  var parts = [];
+  for (var i = 0; i < N; i++){
+    var p = g.board[i];
+    if (!p){ parts.push("."); continue; }
+    parts.push(p.rv
+      ? p.c + p.t + (p.under ? "/" + p.under.c + p.under.t : "")
+      : "?");
+  }
+  return g.turn + "|" + parts.join(",");
+}
 export function shuffle(a){ for (var i = a.length - 1; i > 0; i--){ var j = Math.random() * (i + 1) | 0; var t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
 
 export function blockadeColor(g){

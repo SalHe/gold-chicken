@@ -5,6 +5,7 @@ import { getDemo, saveDemo, removeDemo, newDemoId } from "./demo.js";
 import {
   setChanged, newGame, snapshot, commit, isAITurn, undo,
   getGame, getMode, getAiFirst, setAiFirst, getUndoStack, getActions, getBaseSnapshot,
+  getPositionHistory,
   isReplaying, getReplayInfo, beginReplay, replayStep, replayGoto, adoptReplay, endReplay,
   setMode as setStateMode
 } from "./state.js";
@@ -21,7 +22,7 @@ function scheduleAI(){
     aiTimer = null;
     if (isReplaying() || !isAITurn()) return;
     var g = getGame();
-    var a = aiPick(g, g.turn);
+    var a = aiPick(g, g.turn, { history: getPositionHistory() });
     if (a) commit(a);
   }, 480 + Math.random() * 260);
 }
