@@ -19,7 +19,13 @@ function El(tag){
     remove(){},
     querySelector(){ return El("span"); },
     querySelectorAll(){ return []; },
-    addEventListener(){},
+    _ls: {},
+    addEventListener(type, fn){ (this._ls[type] || (this._ls[type] = [])).push(fn); },
+    /* 供测试模拟点击；事件对象只提供 main.js 按钮处理器用到的字段 */
+    click(){
+      var ev = { target: this, preventDefault(){}, stopPropagation(){} };
+      (this._ls.click || []).slice().forEach(function(fn){ fn(ev); });
+    },
     setAttribute(){},
     hasAttribute(){ return false; },
     offsetWidth: 0,

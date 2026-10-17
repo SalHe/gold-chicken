@@ -5,7 +5,7 @@ import { getDemo, saveDemo, removeDemo, newDemoId } from "./demo.js";
 import {
   setChanged, newGame, snapshot, commit, isAITurn, undo,
   getGame, getMode, getAiFirst, setAiFirst, getUndoStack, getActions, getBaseSnapshot,
-  getPositionHistory,
+  getPositionHistory, getAiPaused, setAiPaused,
   isReplaying, getReplayInfo, beginReplay, replayStep, replayGoto, adoptReplay, endReplay,
   setMode as setStateMode
 } from "./state.js";
@@ -17,14 +17,43 @@ let replayDemo = null;
 function stopAI(){ if (aiTimer){ clearTimeout(aiTimer); aiTimer = null; } }
 
 function scheduleAI(){
+  if (getAiPaused()) return;
   if (aiTimer) clearTimeout(aiTimer);
   aiTimer = setTimeout(function(){
     aiTimer = null;
-    if (isReplaying() || !isAITurn()) return;
+    if (isReplaying() || !isAITurn() || getAiPaused()) return;
     var g = getGame();
     var a = aiPick(g, g.turn, { history: getPositionHistory() });
     if (a) commit(a);
   }, 480 + Math.random() * 260);
+}
+
+/* AI 对弈的单步：暂停自动行棋，立刻替当前一方走一手。
+   走完仍保持暂停，用户可以继续单步、悔棋，或点「自动」恢复连走。 */
+function stepAI(){
+  stopAI();
+  setAiPaused(true);
+  if (isReplaying() || getMode() !== "aiai") return;
+  var g = getGame();
+  if (!g || g.result) return;
+  var a = aiPick(g, g.turn, { history: getPositionHistory() });
+  if (a) commit(a); else syncPace();
+}
+function applyPace(paused){
+  setAiPaused(paused);
+  stopAI();
+  syncPace();
+  if (!paused && !isReplaying() && getMode() === "aiai" && !getGame().result) scheduleAI();
+}
+function syncPace(){
+  var aiai = getMode() === "aiai";
+  var paused = getAiPaused();
+  var over = !getGame() || !!getGame().result;
+  document.getElementById("paceSeg").hidden = !aiai;
+  document.getElementById("bAuto").setAttribute("aria-pressed", paused ? "false" : "true");
+  document.getElementById("bStep").setAttribute("aria-pressed", paused ? "true" : "false");
+  document.getElementById("bAuto").disabled = over;
+  document.getElementById("bStep").disabled = over;
 }
 
 /* ---------- Demo 回放 ---------- */
@@ -90,6 +119,7 @@ function syncModeButtons(){
   document.getElementById("firstSeg").hidden = m !== "ai";
   document.getElementById("pFirst").setAttribute("aria-pressed", getAiFirst() ? "false" : "true");
   document.getElementById("aFirst").setAttribute("aria-pressed", getAiFirst() ? "true" : "false");
+  syncPace();
 }
 
 function setMode(m){
@@ -104,7 +134,8 @@ function start(){
   setChanged(function(reset){
     if (reset) ui.clearPieceCache();
     ui.render();
-    if (!getGame().result && !isReplaying() && isAITurn()) scheduleAI();
+    syncPace();
+    if (!getGame().result && !isReplaying() && isAITurn() && !getAiPaused()) scheduleAI();
   });
 
   ui.initUi();
@@ -124,10 +155,13 @@ function start(){
   document.getElementById("btnUndo").addEventListener("click", function(){
     if (isReplaying() || !getUndoStack().length) return;
     stopAI();
+    /* AI 对弈：悔棋时一并暂停自动行棋，方便逐步复盘；点「自动」继续 */
+    if (getMode() === "aiai") setAiPaused(true);
     /* 人机模式：一次悔棋退回到自己行棋前的一手（连电脑那一手一起退） */
     var n = 1;
     if (getMode() === "ai" && getGame().turn === (getAiFirst() ? 1 : 0)) n = 2;
     undo(n);                       /* 悔棋栈保留，可以一直悔下去 */
+    syncPace();
   });
 
   var btnSaveDemo = document.getElementById("btnSaveDemo");
@@ -185,6 +219,7 @@ function start(){
     setStateMode(m);
     /* 人机模式：人接手当前行棋的一方，AI 执另一方 */
     if (m === "ai") setAiFirst(turn === 1);
+    setAiPaused(false);             /* 从回放接续时恢复自动行棋 */
     replayDemo = null;
     if (!adoptReplay()) return;
     syncModeButtons();
@@ -218,6 +253,15 @@ function start(){
   document.getElementById("mPvp").addEventListener("click", function(){ setMode("pvp"); });
   document.getElementById("mAi").addEventListener("click", function(){ setMode("ai"); });
   document.getElementById("mAiAi").addEventListener("click", function(){ setMode("aiai"); });
+  /* AI 对弈节奏：自动连走 / 暂停逐手 */
+  document.getElementById("bAuto").addEventListener("click", function(){
+    if (getMode() !== "aiai" || getGame().result) return;
+    applyPace(false);
+  });
+  document.getElementById("bStep").addEventListener("click", function(){
+    if (getMode() !== "aiai" || getGame().result) return;
+    stepAI();
+  });
   document.getElementById("pFirst").addEventListener("click", function(){
     if (!getAiFirst()) return;
     setAiFirst(false);

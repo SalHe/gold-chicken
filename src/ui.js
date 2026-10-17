@@ -4,7 +4,7 @@ import { xy, terrain, blockadeColor, isBank, pname, counts, movesFor } from "./r
 import {
   getGame, getSel, setSel, getCurMoves, setCurMoves, getArmed, setArmed,
   getMode, getUndoStack, getActions, findMove, pendingMove, blastZone, commit, isAITurn,
-  isReplaying, getReplayInfo
+  getAiPaused, isReplaying, getReplayInfo
 } from "./state.js";
 import { listDemos } from "./demo.js";
 
@@ -235,6 +235,7 @@ export function renderPanel(){
     sub.textContent = "第 " + (g.log.filter(function(l){ return l.c !== "s"; }).length) + " 手";
     if (mode === "ai") sub.textContent += isAITurn() ? " · 电脑" : " · 你";
     if (mode === "aiai") sub.textContent += g.turn === 0 ? " · 电脑A" : " · 电脑B";
+    if (mode === "aiai" && getAiPaused()) sub.textContent += " · 单步";
   }
 
   var hint = document.getElementById("hint");
@@ -262,7 +263,9 @@ export function renderPanel(){
       ? "电脑思考中…"
       : "点击任意一枚盖着的棋子翻开 · 先手翻出的颜色即先手方阵营";
   } else if (mode === "aiai"){
-    hint.textContent = "电脑对弈进行中 · 「重新开局」可随时开始新的一盘";
+    hint.textContent = getAiPaused()
+      ? "单步模式 · 点「单步」走一手，「自动」恢复连走，「悔棋」可回退"
+      : "电脑对弈进行中 · 点「单步」可暂停并逐手查看";
   } else if (mode === "ai" && isAITurn()){
     hint.textContent = "电脑思考中…";
   } else {

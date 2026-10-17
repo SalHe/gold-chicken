@@ -40,6 +40,17 @@ describe("对战模式", () => {
     expect(state.isAITurn()).toBe(true);
   });
 
+  it("AI 对弈可以暂停单步，开新局自动恢复连走", () => {
+    state.setMode("aiai");
+    state.newGame();
+    expect(state.getAiPaused()).toBe(false);
+    state.setAiPaused(true);
+    expect(state.getAiPaused()).toBe(true);
+    state.newGame();
+    expect(state.getAiPaused()).toBe(false);
+    state.setMode("pvp");
+  });
+
   it("终局后不再调度电脑", () => {
     state.setMode("aiai");
     state.getGame().result = { kind: "draw", why: "测试" };

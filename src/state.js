@@ -8,6 +8,8 @@ import {
 let game = null;
 let sel = -1, curMoves = [], armed = -1, undoStack = [], uidSeq = 0, mode = "pvp";
 let aiFirst = false;
+/* AI 对弈的单步模式：暂停自动行棋，由「单步」按钮逐手推进 */
+let aiPaused = false;
 let changed = null;
 /* 本局的起点与走子序列（供 Demo 存储/回放）；undoStack 与 actions 一一对应 */
 let baseSnapshot = null, actions = [];
@@ -39,6 +41,8 @@ export function getMode(){ return mode; }
 export function setMode(m){ mode = m; }
 export function getAiFirst(){ return aiFirst; }
 export function setAiFirst(v){ aiFirst = !!v; }
+export function getAiPaused(){ return aiPaused; }
+export function setAiPaused(v){ aiPaused = !!v; }
 export function getActions(){ return actions; }
 export function getBaseSnapshot(){ return baseSnapshot; }
 /* 近期公开局面（含当前局面）；AI 用它避开重复、原地兜圈 */
@@ -74,6 +78,7 @@ export function newGame(){
     pulse: null
   };
   sel = -1; curMoves = []; armed = -1; undoStack = []; actions = [];
+  aiPaused = false;                 /* 新开局总是回到自动行棋 */
   say("s", "开局。先手请翻棋，翻出的颜色即先手方阵营。");
   posHistory = [positionKey(game)];
   baseSnapshot = snapshot();

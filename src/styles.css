@@ -172,6 +172,7 @@ body{
   color:var(--muted); cursor:pointer;
 }
 .seg button[aria-pressed="true"]{background:var(--gold); color:var(--bg); font-weight:700}
+.seg button:disabled{opacity:.45; cursor:not-allowed}
 .seg button:focus-visible{outline:2px solid var(--gold); outline-offset:-2px}
 
 /* ---------- 布局 ---------- */
