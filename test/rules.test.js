@@ -210,13 +210,34 @@ describe("河", () => {
     expect(s && s.kind).toBe("self");
   });
 
-  it("进河仍按普通一步，斜角进不去", () => {
-    const diag = xy2i(3, 3), target = xy2i(2, 4);
+  it("龙象可以从河边陆地斜着进河", () => {
+    const diag = xy2i(3, 3), target = xy2i(2, 4), other = xy2i(3, 4);
+
+    /* 斜角的 (3,3) → (2,4)，龙、象都可以 */
     state.setGame(mk([[diag, ELEPHANT]], []));
+    expect(rules.movesFor(state.getGame(), diag).some(m => m.to === target && m.kind === "move")).toBe(true);
+    state.setGame(mk([[diag, DRAGON]], []));
+    expect(rules.movesFor(state.getGame(), diag).some(m => m.to === target)).toBe(true);
+
+    /* 四个河边陆地格都能进任一河格，且不发生重复着法 */
+    for (const [x, y] of [[2, 3], [3, 3], [2, 5], [3, 5]]){
+      const from = xy2i(x, y);
+      state.setGame(mk([[from, ELEPHANT]], []));
+      const ms = rules.movesFor(state.getGame(), from);
+      const dests = ms.filter(m => rules.isRiver(m.to)).map(m => m.to).sort((a, b) => a - b);
+      expect(dests).toEqual([target, other].sort((a, b) => a - b));
+      expect(ms.filter(m => m.to === target).length).toBe(1);
+    }
+
+    /* 斜着进有敌子的河格是「压住」，有己方子的河格进不去 */
+    state.setGame(mk([[diag, ELEPHANT]], [[target, DRAGON]]));
+    expect(rules.movesFor(state.getGame(), diag).find(m => m.to === target).kind).toBe("press");
+    state.setGame(mk([[diag, ELEPHANT], [target, 7]], []));
     expect(rules.movesFor(state.getGame(), diag).some(m => m.to === target)).toBe(false);
-    const straight = xy2i(2, 3);
-    state.setGame(mk([[straight, ELEPHANT]], []));
-    expect(rules.movesFor(state.getGame(), straight).some(m => m.to === target)).toBe(true);
+
+    /* 不能下河的棋子依旧不能斜着进河 */
+    state.setGame(mk([[diag, LEOPARD]], []));
+    expect(rules.movesFor(state.getGame(), diag).some(m => m.to === target)).toBe(false);
   });
 
   it("敌方堵岸封死河中之子，拆岸即解封", () => {

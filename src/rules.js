@@ -109,6 +109,18 @@ export function movesFor(g, i){
     }
   }
 
+  /* 龙、象可以斜着下河：站在河边的四格陆地上时，两格河都能进。
+     正对的那一格由下面的四邻循环处理，这里只补斜角，避免重复着法。 */
+  if ((p.t === DRAGON || p.t === ELEPHANT) && !isBank(i) && touchesRiver(i)){
+    for (k = 0; k < N; k++){
+      if (!isRiver(k)) continue;
+      var rv = xy(k);
+      if (Math.abs(rv.x - c.x) + Math.abs(rv.y - c.y) === 1) continue;
+      lc = riverCheck(g, p, k);
+      if (lc.ok) out.push({ from: i, to: k, kind: lc.kind });
+    }
+  }
+
   for (k = 0; k < 4; k++){
     nx = c.x + DIRS[k][0]; ny = c.y + DIRS[k][1];
     if (nx < 1 || nx > W || ny < 1 || ny > H) continue;
