@@ -122,7 +122,7 @@ function start(){
     var acts = getActions(), start0 = getBaseSnapshot();
     if (!acts.length || !start0) return;
     var g = getGame();
-    saveDemo({
+    var ok = saveDemo({
       id: newDemoId(),
       at: Date.now(),
       result: g.result || null,
@@ -130,7 +130,7 @@ function start(){
       actions: acts.slice()
     });
     ui.renderDemos();
-    btnSaveDemo.textContent = "已保存 ✓";
+    btnSaveDemo.textContent = ok ? "已保存 ✓" : "保存失败";
     setTimeout(function(){ btnSaveDemo.textContent = "保存 Demo"; }, 1200);
   });
 
