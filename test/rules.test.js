@@ -334,11 +334,14 @@ describe("死局守卫", () => {
 describe("对局 soak", () => {
   it("120 局自然终局无死锁", () => {
     let stalls = 0, games = 0, wins = 0, draws = 0, maxPly = 0;
+    /* 终局由 60 手无吃子/死局/吃光保证；这里只是防止实现死循环的守卫，
+       取 800 手留足余量（实测单局最长约 400 手）。 */
+    const PLY_CAP = 800;
     for (let n = 0; n < 120; n++){
       state.newGame();
       games++;
       let ply = 0;
-      while (ply < 400){
+      while (ply < PLY_CAP){
         const G = state.getGame();
         const acts = rules.allActions(G, G.turn);
         if (!acts.length) break;
@@ -358,7 +361,7 @@ describe("对局 soak", () => {
         if (r) break;
       }
       maxPly = Math.max(maxPly, ply);
-      if (ply >= 400 && !state.getGame().result) stalls++;
+      if (ply >= PLY_CAP && !state.getGame().result) stalls++;
       if (state.getGame().result && state.getGame().result.kind === "win") wins++; else draws++;
     }
     expect(stalls).toBe(0);
