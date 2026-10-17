@@ -1,6 +1,6 @@
 /* 自残/引爆点击流：验证 UI 层真的能走到自残与二次确认。 */
 import { describe, it, expect, beforeAll } from "vitest";
-import { DRAGON, LEOPARD } from "../src/constants.js";
+import { DRAGON, ELEPHANT, LEOPARD } from "../src/constants.js";
 import * as state from "../src/state.js";
 import * as ui from "../src/ui.js";
 import { installDomStub } from "./helpers/dom-stub.js";
@@ -143,5 +143,39 @@ describe("自残/引爆点击流", () => {
     expect(state.getArmed()).toBe(-1);
     expect(state.getGame().board[lp] && state.getGame().board[lp].t).toBe(6);
     expect(state.getGame().board[L] && state.getGame().board[R]).toBeTruthy();
+  });
+});
+
+describe("压子与行棋记录", () => {
+  it("河格压子一次点击即落子，被压的棋子缩小画在下面", () => {
+    const from = xy2i(2, 3), to = xy2i(2, 4);
+    state.setGame(mk([[from, DRAGON]], [[to, ELEPHANT]]));
+    state.setSel(-1); state.setArmed(-1);
+    ui.clearPieceCache();
+    const piecesEl = document.getElementById("pieces");
+    const before = piecesEl.children.length;
+
+    ui.onCell(from);
+    expect(state.getCurMoves().some(m => m.to === to && m.kind === "press")).toBe(true);
+    ui.onCell(to);                       /* 压子不是危险着法，无需二次确认 */
+
+    const G = state.getGame();
+    expect(G.board[to] && G.board[to].c).toBe("r");
+    expect(G.board[to].under && G.board[to].under.c).toBe("b");
+    expect(state.getArmed()).toBe(-1);
+
+    const added = piecesEl.children.slice(before);
+    const pressed = added.filter(el => el.classList.contains("pressed"));
+    expect(pressed.length).toBe(1);
+    expect(pressed[0].dataset.i).toBe(to);
+  });
+
+  it("行棋记录总是滚到最新的一步", () => {
+    const lg = document.getElementById("log");
+    state.setGame(mk([[xy2i(1, 1), 3]], [[xy2i(4, 7), 3]]));
+    lg.scrollHeight = 777;
+    lg.scrollTop = 0;
+    ui.render();
+    expect(lg.scrollTop).toBe(777);
   });
 });

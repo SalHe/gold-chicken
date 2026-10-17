@@ -50,6 +50,18 @@ export function landCheck(g, p, ti){
 export function crossesRiver(fromY, toY){
   return (fromY < 4 && toY > 4) || (fromY > 4 && toY < 4);
 }
+/* 河格落点：河是「压」不是「吃」。
+   - 空格：正常走入
+   - 敌子：不论大小，压在其上（河里不兑子，也不吃子）
+   - 己方子（无论明面还是被压在下面）：占不得，也不能自残河中的棋子 */
+export function riverCheck(g, p, ti){
+  var q = g.board[ti];
+  if (!q) return { ok: true, kind: "move" };
+  if (!q.rv) return { ok: false };
+  if (q.c === p.c) return { ok: false };
+  if (q.under && q.under.c === p.c) return { ok: false };
+  return { ok: true, kind: "press" };
+}
 /* 某枚棋子的全部合法着法 */
 export function movesFor(g, i){
   var p = g.board[i];
@@ -94,8 +106,8 @@ export function movesFor(g, i){
     ni = id(nx, ny); ct = terrain(nx, ny);
 
     if (ct === "river"){
-      if (p.t === DRAGON || p.t === ELEPHANT){        /* 龙、象可下河 */
-        lc = landCheck(g, p, ni);
+      if (p.t === DRAGON || p.t === ELEPHANT){        /* 龙、象可下河；遇到敌子则压住 */
+        lc = riverCheck(g, p, ni);
         if (lc.ok) out.push({ from: i, to: ni, kind: lc.kind });
       } else if (p.t === LEOPARD && bl){              /* 堵岸时豹可下河引爆 */
         if (!g.board[ni]) out.push({ from: i, to: ni, kind: "dive" });
@@ -128,6 +140,8 @@ export function counts(g){
     var p = g.board[i];
     if (!p) continue;
     if (p.c === "r") r++; else b++;
+    /* 被压在河格下面的棋子仍然活着，也要计入 */
+    if (p.under){ if (p.under.c === "r") r++; else b++; }
   }
   return { r: r, b: b };
 }
@@ -143,11 +157,23 @@ export function applyMove(g, a){
   var p = g.board[a.from];
   var q = g.board[a.to];
   var events = [];
+  /* 本子若正压着别人，它一离开，底下的棋子就原地复位 */
+  var below = p.under || null;
+
+  if (a.kind === "press"){
+    p.under = q;
+    g.board[a.from] = below;
+    g.board[a.to] = p;
+    events.push({ type: "press", p: q, at: a.to });
+    return events;
+  }
+
   if (q){
     g.caps[q.c].push(q.t);
     events.push({ type: "eat", p: q, self: q.c === p.c, at: a.to });
   }
-  g.board[a.from] = null;
+  p.under = null;
+  g.board[a.from] = below;
   g.board[a.to] = p;
 
   /* 同子邀兑：同归于尽，吃子方也一并阵亡 */
@@ -164,7 +190,16 @@ export function applyMove(g, a){
     var lost = [];
     for (var i = 0; i < N; i++){
       var c = xy(i);
-      if (c.y >= 3 && c.y <= 5 && g.board[i]) lost.push({ p: kill(g, i), at: i });
+      if (c.y < 3 || c.y > 5) continue;
+      var top = g.board[i];
+      if (!top) continue;
+      lost.push({ p: kill(g, i), at: i });
+      if (top.under){                     /* 压在河格下面的棋子同样被炸死 */
+        var u = top.under;
+        top.under = null;
+        g.caps[u.c].push(u.t);
+        lost.push({ p: u, at: i });
+      }
     }
     events.push({ type: "boom", at: a.to, lost: lost });
   }
@@ -177,6 +212,7 @@ export function deadPosition(g){
     p = g.board[i];
     if (!p) continue;
     if (!p.rv) return false;              /* 还有暗棋，未定 */
+    if (p.under) return false;            /* 还有被压住的子，松开后可能再生变数 */
   }
   /* 豹还能引爆则不算死局 */
   if (blockadeColor(g)){

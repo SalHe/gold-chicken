@@ -25,6 +25,12 @@ export function evalPos(g, col){
   var s = 0, k, j, myMat = 0, opMat = 0;
   for (k = 0; k < mine.length; k++)  myMat += VAL[g.board[mine[k]].t];
   for (k = 0; k < theirs.length; k++) opMat += VAL[g.board[theirs[k]].t];
+  /* 河格里被压住的子仍然活着，也要计入子力 */
+  for (i = 0; i < N; i++){
+    var u = g.board[i] && g.board[i].under;
+    if (!u) continue;
+    if (u.c === col) myMat += VAL[u.t]; else opMat += VAL[u.t];
+  }
   /* 子力差在残局里权重更大：领先时乐于兑子，落后时回避兑子 */
   s = (myMat - opMat) * (1 + 320 / (myMat + opMat + 320));
 
@@ -49,6 +55,12 @@ export function evalPos(g, col){
   for (k = 0; k < mine.length; k++){
     var c = xy(mine[k]);
     if (c.y === 3 || c.y === 5) s += 1.5;
+  }
+  /* 压子：把敌子压在河下，等于暂时废掉它；己方被压则吃紧 */
+  for (i = 0; i < N; i++){
+    var top = g.board[i];
+    if (!top || !top.under) continue;
+    if (top.c === col) s += 3; else s -= 3;
   }
   return s;
 }

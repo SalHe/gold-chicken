@@ -3,7 +3,7 @@ import { aiPick } from "./ai.js";
 import * as ui from "./ui.js";
 import {
   setChanged, newGame, restore, snapshot, commit, isAITurn,
-  getGame, getMode, getUndoStack, setMode as setStateMode
+  getGame, getMode, getAiFirst, setAiFirst, getUndoStack, setMode as setStateMode
 } from "./state.js";
 
 let aiTimer = null;
@@ -13,15 +13,26 @@ function scheduleAI(){
   aiTimer = setTimeout(function(){
     aiTimer = null;
     if (!isAITurn()) return;
-    var a = aiPick(getGame(), 1);
+    var g = getGame();
+    var a = aiPick(g, g.turn);
     if (a) commit(a);
   }, 480 + Math.random() * 260);
 }
 
-function setMode(m){
-  setStateMode(m);
+function syncModeButtons(){
+  var m = getMode();
   document.getElementById("mPvp").setAttribute("aria-pressed", m === "pvp" ? "true" : "false");
   document.getElementById("mAi").setAttribute("aria-pressed", m === "ai" ? "true" : "false");
+  document.getElementById("mAiAi").setAttribute("aria-pressed", m === "aiai" ? "true" : "false");
+  /* 先手选择只在人机对弈时有意义 */
+  document.getElementById("firstSeg").hidden = m !== "ai";
+  document.getElementById("pFirst").setAttribute("aria-pressed", getAiFirst() ? "false" : "true");
+  document.getElementById("aFirst").setAttribute("aria-pressed", getAiFirst() ? "true" : "false");
+}
+
+function setMode(m){
+  setStateMode(m);
+  syncModeButtons();
   if (aiTimer){ clearTimeout(aiTimer); aiTimer = null; }
   newGame();
 }
@@ -35,6 +46,7 @@ function start(){
 
   ui.initUi();
   ui.buildGrid();
+  syncModeButtons();
   newGame();
 
   document.getElementById("btnNew").addEventListener("click", function(){
@@ -50,8 +62,11 @@ function start(){
     if (!undoStack.length) return;
     if (aiTimer){ clearTimeout(aiTimer); aiTimer = null; }
     var s = undoStack.pop();
-    /* 人机模式下退回自己的一手 */
-    if (getMode() === "ai" && undoStack.length && getGame().turn === 0) s = undoStack.pop();
+    /* 人机模式：一次悔棋退回到自己行棋前的一手（连电脑那一手一起退） */
+    if (getMode() === "ai"){
+      var humanTurn = getAiFirst() ? 1 : 0;
+      if (getGame().turn === humanTurn && undoStack.length) s = undoStack.pop();
+    }
     restore(s);
   });
   var modal = document.getElementById("modal");
@@ -61,6 +76,21 @@ function start(){
 
   document.getElementById("mPvp").addEventListener("click", function(){ setMode("pvp"); });
   document.getElementById("mAi").addEventListener("click", function(){ setMode("ai"); });
+  document.getElementById("mAiAi").addEventListener("click", function(){ setMode("aiai"); });
+  document.getElementById("pFirst").addEventListener("click", function(){
+    if (!getAiFirst()) return;
+    setAiFirst(false);
+    syncModeButtons();
+    if (aiTimer){ clearTimeout(aiTimer); aiTimer = null; }
+    newGame();
+  });
+  document.getElementById("aFirst").addEventListener("click", function(){
+    if (getAiFirst()) return;
+    setAiFirst(true);
+    syncModeButtons();
+    if (aiTimer){ clearTimeout(aiTimer); aiTimer = null; }
+    newGame();
+  });
 
   /* 页面被重新发布时保留对局 */
   try{

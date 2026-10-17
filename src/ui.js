@@ -68,31 +68,36 @@ export function syncPieces(){
   var g = getGame();
   var sel = getSel(), curMoves = getCurMoves(), armed = getArmed();
   var alive = new Set();
-  for (var i = 0; i < N; i++){
-    var p = g.board[i];
-    if (!p) continue;
+
+  /* 一枚棋子的落位。pressed = 被压在河格下面的那枚：缩小、偏移、不可点 */
+  function place(p, i, pressed){
     alive.add(p.uid);
     var el = cache.get(p.uid);
+    var c = xy(i);
     if (!el){
       /* 新棋子：先定好位再入 DOM，避免从左上角滑入 */
       el = makePieceEl(p);
-      var c0 = xy(i);
       el.dataset.i = i;
-      el.style.setProperty("--px", String(c0.x - 1));
-      el.style.setProperty("--py", String(c0.y - 1));
+      el.style.setProperty("--px", String(c.x - 1));
+      el.style.setProperty("--py", String(c.y - 1));
       el.classList.add(p.c === "r" ? "red" : "black");
       if (!p.rv) el.classList.add("hidden");
+      if (pressed) el.classList.add("pressed");
       pieceEl.appendChild(el);
       cache.set(p.uid, el);
-      continue;
+      return;
     }
-    var c = xy(i);
     el.dataset.i = i;
     el.style.setProperty("--px", c.x - 1);
     el.style.setProperty("--py", c.y - 1);
     el.classList.toggle("hidden", !p.rv);
     el.classList.toggle("red", p.c === "r");
     el.classList.toggle("black", p.c === "b");
+    el.classList.toggle("pressed", pressed);
+    if (pressed){
+      el.classList.remove("sel", "cap", "selfcap", "armed", "doomed");
+      return;
+    }
     el.classList.toggle("sel", i === sel);
     var isCap = false, isSelf = false;
     curMoves.forEach(function(m){
@@ -113,6 +118,13 @@ export function syncPieces(){
       (function(node){ setTimeout(function(){ node.classList.remove("pulse"); }, 520); })(el);
     }
   }
+
+  for (var i = 0; i < N; i++){
+    var p = g.board[i];
+    if (!p) continue;
+    place(p, i, false);
+    if (p.under) place(p.under, i, true);   /* 河格里被压住的子也照样画出来 */
+  }
   cache.forEach(function(el, uid){
     if (alive.has(uid)) return;
     el.classList.add("gone");
@@ -128,12 +140,13 @@ export function renderCells(){
   for (var k = 0; k < curMoves.length; k++){
     m = curMoves[k];
     if (m.kind === "move") mv[m.to] = "mv";
+    else if (m.kind === "press") mv[m.to] = "mv press";
     else if (m.kind === "thirst") mv[m.to] = "mv thirst";
     else if (m.kind === "dive") mv[m.to] = "mv boom";
   }
   var bl = blockadeColor(g);
   for (var i = 0; i < N; i++){
-    var d = cellEls[i], cls = d.className.replace(/\s*(mv|thirst|boom|sel|last|blockade)\b/g, "");
+    var d = cellEls[i], cls = d.className.replace(/\s*(mv|press|thirst|boom|sel|last|blockade)\b/g, "");
     if (mv[i]) cls += " " + mv[i];
     if (i === getSel()) cls += " sel";
     if (g.last && (i === g.last.from || i === g.last.to)) cls += " last";
@@ -211,12 +224,12 @@ export function renderPanel(){
     }
   } else if (!g.firstFlip){
     who.textContent = "先手翻棋";
-    sub.textContent = mode === "ai" ? "你执先手" : "先手方";
+    sub.textContent = mode === "pvp" ? "先手方" : (isAITurn() ? "电脑执先手" : "你执先手");
   } else {
     who.textContent = (cur === "r" ? "红方" : "黑方") + "行棋";
     sub.textContent = "第 " + (g.log.filter(function(l){ return l.c !== "s"; }).length) + " 手";
-    if (mode === "ai" && g.turn === 1) sub.textContent += " · 电脑";
-    if (mode === "ai" && g.turn === 0) sub.textContent += " · 你";
+    if (mode === "ai") sub.textContent += isAITurn() ? " · 电脑" : " · 你";
+    if (mode === "aiai") sub.textContent += g.turn === 0 ? " · 电脑A" : " · 电脑B";
   }
 
   var hint = document.getElementById("hint");
@@ -238,9 +251,13 @@ export function renderPanel(){
       + "（己方 " + mine + " · 敌方 " + theirs + (hid ? " · 暗棋 " + hid + " 枚归属不明" : "") + "）"
       + "，豹自身也在其中 · 点别处取消";
   } else if (!g.firstFlip){
-    hint.textContent = "点击任意一枚盖着的棋子翻开 · 先手翻出的颜色即先手方阵营";
-  } else if (g.turn === 0 && mode === "ai"){
-    hint.textContent = isAITurn() ? "电脑思考中…" : "轮到你走棋：点己方棋子选中，或翻开一枚暗棋";
+    hint.textContent = isAITurn()
+      ? "电脑思考中…"
+      : "点击任意一枚盖着的棋子翻开 · 先手翻出的颜色即先手方阵营";
+  } else if (mode === "aiai"){
+    hint.textContent = "电脑对弈进行中 · 「重新开局」可随时开始新的一盘";
+  } else if (mode === "ai" && isAITurn()){
+    hint.textContent = "电脑思考中…";
   } else {
     hint.textContent = "点己方棋子选中，再点高亮格落子；点暗棋即翻开";
   }
@@ -262,8 +279,11 @@ export function renderPanel(){
 
   var lg = document.getElementById("log");
   lg.innerHTML = g.log.map(function(l){ return '<div class="' + l.c + '">' + l.h + "</div>"; }).join("");
+  /* 行棋记录总是停在最新的一步 */
+  lg.scrollTop = lg.scrollHeight;
 
-  document.getElementById("btnUndo").disabled = getUndoStack().length === 0 || !!g.result;
+  document.getElementById("btnUndo").disabled =
+    getUndoStack().length === 0 || !!g.result || mode === "aiai";
 }
 
 /* ================= 交互 ================= */

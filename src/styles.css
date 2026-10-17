@@ -244,6 +244,12 @@ body{
   content:"☠"; background:none; opacity:1; width:auto; height:auto;
   font-size:calc(var(--cellw) * .38); color:var(--danger); line-height:1;
 }
+/* 河格压子：箭头盖在敌子上面，提示「压住」而不是吃掉 */
+.cell.mv.press::after{
+  content:"▼"; background:none; opacity:.95; width:auto; height:auto;
+  font-size:calc(var(--cellw) * .36); color:var(--gold); line-height:1; z-index:5;
+  text-shadow:0 1px 4px rgba(0,0,0,.5);
+}
 .cell .mk{
   position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
   font-size:calc(var(--cellw) * .34); color:var(--gold); line-height:1;
@@ -295,6 +301,13 @@ body{
 }
 .piece:hover{z-index:9}
 .piece.sel{z-index:10}
+/* 河格里被压住的棋子：缩小、偏到右下角，垫在压它的子下面，不可点 */
+.piece.pressed{
+  z-index:3; pointer-events:none; cursor:default;
+  transform:translate(calc(var(--px, 0) * (var(--cellw) + var(--gap)) + var(--cellw) * .22),
+                    calc(var(--py, 0) * (var(--cellw) + var(--gap)) + var(--cellw) * .22)) scale(.58);
+}
+.piece.pressed .disc{inset:1px; box-shadow:0 0 0 1.5px var(--gold-soft), inset 0 0 0 1px rgba(0,0,0,.28)}
 .piece.sel .disc.front{box-shadow:0 0 0 3px var(--gold), 0 0 18px 2px var(--gold-soft)}
 .piece.cap .disc::after{
   content:""; position:absolute; inset:-3px; border-radius:50%;

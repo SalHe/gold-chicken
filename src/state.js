@@ -7,6 +7,7 @@ import {
 
 let game = null;
 let sel = -1, curMoves = [], armed = -1, undoStack = [], uidSeq = 0, mode = "pvp";
+let aiFirst = false;
 let changed = null;
 
 function notify(reset){ if (changed) changed(reset); }
@@ -23,6 +24,8 @@ export function setArmed(v){ armed = v; }
 export function getUndoStack(){ return undoStack; }
 export function getMode(){ return mode; }
 export function setMode(m){ mode = m; }
+export function getAiFirst(){ return aiFirst; }
+export function setAiFirst(v){ aiFirst = !!v; }
 export function setChanged(fn){ changed = fn; }
 
 export function newGame(){
@@ -96,14 +99,19 @@ export function doMove(a, pi){
   var col = p.c === "r" ? "红" : "黑";
   var line = col + "方 " + pname(p) + " " + posName(a.from) + "→" + posName(a.to);
   var ate = false;
-  var traded = !!(q && q.t === p.t);
+  var traded = !!(q && q.t === p.t && a.kind !== "press");
 
   if (q){
-    ate = true;
-    var whose = q.c === p.c ? "己方 " : (q.c === "r" ? "红方 " : "黑方 ");
-    line += traded
-      ? "，与 " + whose + pname(q) + " <span class='k'>邀兑同归于尽</span>"
-      : "，吃掉 " + whose + pname(q);
+    if (a.kind === "press"){
+      /* 河格压子：不杀不兑，被压的子留在下面 */
+      line += "，<span class='k'>压住</span> " + (q.c === "r" ? "红方 " : "黑方 ") + pname(q);
+    } else {
+      ate = true;
+      var whose = q.c === p.c ? "己方 " : (q.c === "r" ? "红方 " : "黑方 ");
+      line += traded
+        ? "，与 " + whose + pname(q) + " <span class='k'>邀兑同归于尽</span>"
+        : "，吃掉 " + whose + pname(q);
+    }
   }
   var ev = applyMove(game, a);
 
@@ -163,7 +171,12 @@ export function say(cls, html){
   if (game.log.length > 160) game.log.shift();
 }
 
-export function isAITurn(){ return mode === "ai" && game && !game.result && game.turn === 1; }
+export function isAITurn(){
+  if (!game || game.result) return false;
+  if (mode === "ai") return game.turn === (aiFirst ? 0 : 1);
+  if (mode === "aiai") return true;
+  return false;
+}
 
 export function findMove(to){
   for (var k = 0; k < curMoves.length; k++) if (curMoves[k].to === to) return curMoves[k];
@@ -176,7 +189,9 @@ export function blastZone(){
   var out = [];
   for (var i = 0; i < N; i++){
     var p = game.board[i];
-    if (p && xy(i).y >= 3 && xy(i).y <= 5) out.push({ p: p, i: i });
+    if (!p || xy(i).y < 3 || xy(i).y > 5) continue;
+    out.push({ p: p, i: i });
+    if (p.under) out.push({ p: p.under, i: i });   /* 河格下被压的棋子同样会被炸掉 */
   }
   return out;
 }
