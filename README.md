@@ -29,8 +29,13 @@ src/             # 源码（ES 模块）
   styles.css     样式
 test/            # Vitest 用例（含轻量 DOM 桩）
 build.mjs        # esbuild 打包脚本
+.github/workflows/deploy.yml   # CI：测试 → 构建 → 发布到 gh-pages
 ```
 
 `index.html` 是 `npm run build` 的产物，不入版本库。克隆后跑一次构建即可得到可双击游玩的单文件。
+
+## 发布
+
+推送到 `main` 会触发 GitHub Actions：跑测试 → 构建 → 把 `index.html` 以孤立提交强制推送到 `gh-pages` 分支。GitHub Pages 的 Source 设为 **Deploy from a branch → gh-pages → / (root)** 即可。
 
 行为零回归：这是对单文件实现的「重新组织」，所有规则逻辑原样搬移。
