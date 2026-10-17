@@ -672,6 +672,16 @@ export function evalPos(g, col){
       else if (canDeny) bankVal -= 4;            /* 对方随时能踏上空岸，先机不牢 */
       s += bankSide === col ? bankVal : -bankVal;
     }
+    /* 两岸皆空：谁先能踏上一岸，谁就先握住堵岸的主动——占岸后对手
+       必须回防另一岸。只在一方能踏、另一方不能踏时计价；双方都能踏
+       就是互相争抢，先机抵消（这正是第一翻选在岸旁的价值）。 */
+    if (bankNum.r === 0 && bankNum.b === 0){
+      var mineCanBank = canStepTo(mine, mvs, BANK_CELLS[0], -1) ||
+                        canStepTo(mine, mvs, BANK_CELLS[1], -1);
+      var oppCanBank = canStepTo(theirs, mvs, BANK_CELLS[0], -1) ||
+                       canStepTo(theirs, mvs, BANK_CELLS[1], -1);
+      if (mineCanBank !== oppCanBank) s += mineCanBank ? 4 : -4;
+    }
   }
 
   /* 敌方豹的引爆威胁：己方摆在 Y3–Y5 的子有被一波带走的风险 */
@@ -864,8 +874,33 @@ function rootSearch(g, pi, maxDepth, budget){
 }
 
 /* ---------- 选着 ---------- */
-/* 先手尚未定色：只在中路附近翻棋（翻出的颜色即先手方阵营，位置决定后续机动）。 */
-function pickOpeningFlip(acts){
+/* 先手尚未定色：第一翻会决定 AI 执哪一方。对每个候选暗格按公开的
+   暗子池做期望估值——假设翻出身份 q，AI 就执 q 的颜色，从该颜色的
+   视角估分，再按等概率平均。岸旁的落点因此会得到「下一手踏岸」的
+   先机权重。全程不读取暗格的真实身份。 */
+function pickOpeningFlip(g, acts){
+  var pool = hiddenPool(g), scored = [], i, k, cell, sum, g2, p, q;
+  if (!pool || !pool.length) return pickOpeningFallback(acts);
+  for (i = 0; i < acts.length; i++){
+    cell = acts[i].i;
+    sum = 0;
+    for (k = 0; k < pool.length; k++){
+      q = pool[k];
+      g2 = cloneG(g);
+      p = g2.board[cell];
+      p.c = q.c; p.t = q.t; p.rv = true;
+      sum += evalPos(g2, q.c);
+    }
+    scored.push({ a: acts[i], sc: sum / pool.length });
+  }
+  var max = -Infinity;
+  for (i = 0; i < scored.length; i++) if (scored[i].sc > max) max = scored[i].sc;
+  var top = [];                       /* 同分落点里随机挑，保留开局变化 */
+  for (i = 0; i < scored.length; i++) if (scored[i].sc >= max - 1e-9) top.push(scored[i].a);
+  return top[Math.random() * top.length | 0];
+}
+/* 池子对不上（非标准摆局）时的经验规则：翻中路，后续机动性更好。 */
+function pickOpeningFallback(acts){
   var best = acts[0], bs = -1e9;
   for (var i = 0; i < acts.length; i++){
     var c = xy(acts[i].i);
@@ -885,7 +920,7 @@ export function aiPick(g, pi, opts){
   var col = g.pcolor[pi];
   var acts = allActions(g, pi);
   if (!acts.length) return null;
-  if (!col) return pickOpeningFlip(acts);
+  if (!col) return pickOpeningFlip(g, acts);
 
   opts = opts || {};
   var budget = opts.budget || NODE_BUDGET;

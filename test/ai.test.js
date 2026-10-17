@@ -181,7 +181,8 @@ describe("堵岸先机", () => {
   it("先占一岸比无人占岸更有利", () => {
     const held = mk([[BANK_L, LEOPARD]], [[farB, LEOPARD]]);
     const open = mk([[xy2i(1, 3), LEOPARD]], [[farB, LEOPARD]]);
-    expect(ai.evalPos(held, "r")).toBeGreaterThan(ai.evalPos(open, "r") + 5);
+    /* 岸旁虽也算「踏岸先机」，但真正占住一岸仍明显更值钱。 */
+    expect(ai.evalPos(held, "r")).toBeGreaterThan(ai.evalPos(open, "r") + 3);
   });
 
   it("另一岸在望且无人争抢时，先机价值更高", () => {
@@ -215,6 +216,59 @@ describe("堵岸先机", () => {
     const g = mk([[xy2i(1, 3), LEOPARD], [xy2i(1, 7), 10]], [[BANK_R, LEOPARD], [farB, ROOSTER]]);
     const picked = ai.aiPick(g, 0);
     expect(picked).toMatchObject({ kind: "move", to: BANK_L });
+  });
+
+  it("两岸皆空时，先能踏岸的一方占先机", () => {
+    /* 同样的红豹：在 (1,3) 下一手能踏上 (1,4)，在 (2,3) 不能。 */
+    const canStep = mk([[xy2i(1, 3), LEOPARD]], [[xy2i(3, 7), LEOPARD]]);
+    const cannot = mk([[xy2i(2, 3), LEOPARD]], [[xy2i(3, 7), LEOPARD]]);
+    expect(ai.evalPos(canStep, "r")).toBeGreaterThan(ai.evalPos(cannot, "r") + 3);
+  });
+});
+
+describe("先手翻棋", () => {
+  const BANK_ADJ = new Set([
+    xy2i(1, 3), xy2i(1, 5), xy2i(4, 3), xy2i(4, 5)
+  ]);
+
+  it("优先翻岸旁的陆地，为占岸做准备", () => {
+    /* 第一翻决定 AI 执哪一方；翻在岸旁，下一手就能踏上空岸，
+       抢在对手之前握住堵岸的主动。 */
+    state.newGame();
+    const a = ai.aiPick(state.getGame(), 0);
+    expect(a.kind).toBe("flip");
+    expect(BANK_ADJ.has(a.i)).toBe(true);
+  });
+
+  it("第一翻同样只按公开暗子池计价，不读取暗子身份", () => {
+    /* 满盘 24 枚全暗、尚未定色：交换两枚暗子的真实身份不改变选择。 */
+    const cells = [];
+    for (let i = 0; i < N; i++){
+      if (!rules.isRiver(i) && !rules.isBank(i)) cells.push(i);
+    }
+    function board(swap){
+      const reds = [], blacks = [];
+      for (let t = 1; t <= 12; t++){
+        reds.push([cells[t - 1], t, false]);
+        blacks.push([cells[11 + t], t, false]);
+      }
+      if (swap){
+        const t0 = blacks[0][1], t5 = blacks[5][1];
+        blacks[0][1] = t5; blacks[5][1] = t0;
+      }
+      return mk(reds, blacks, { pcolor: [null, null], firstFlip: false });
+    }
+
+    const rnd = Math.random;
+    Math.random = () => 0.42;
+    let a1, a2;
+    try {
+      a1 = ai.aiPick(board(false), 0);
+      a2 = ai.aiPick(board(true), 0);
+    } finally {
+      Math.random = rnd;
+    }
+    expect(a1).toEqual(a2);
   });
 });
 
