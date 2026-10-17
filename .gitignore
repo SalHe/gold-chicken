@@ -1,1 +1,4 @@
 node_modules/
+
+# 构建产物：由 `npm run build` 从 src/ 生成，不入库
+/index.html

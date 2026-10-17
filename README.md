@@ -29,7 +29,8 @@ src/             # 源码（ES 模块）
   styles.css     样式
 test/            # Vitest 用例（含轻量 DOM 桩）
 build.mjs        # esbuild 打包脚本
-index.html       # 构建产物（提交；build 覆盖它）
 ```
+
+`index.html` 是 `npm run build` 的产物，不入版本库。克隆后跑一次构建即可得到可双击游玩的单文件。
 
 行为零回归：这是对单文件实现的「重新组织」，所有规则逻辑原样搬移。
