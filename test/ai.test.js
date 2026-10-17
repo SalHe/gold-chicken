@@ -117,6 +117,38 @@ describe("龙、金鸡与河界", () => {
   });
 });
 
+describe("残局技术", () => {
+  it("己方堵岸时，龙渡河到敌方半场施压更有价值", () => {
+    /* 两岸都是黑子 → 黑方堵岸，河只冻敌方子，龙可自由横渡 */
+    const banks = [[xy2i(1, 4), 3], [xy2i(4, 4), LEOPARD]];
+    const own = mk([], [...banks, [xy2i(2, 6), DRAGON]]);
+    const crossed = mk([], [...banks, [xy2i(2, 2), DRAGON]]);
+    expect(ai.evalPos(crossed, "b")).toBeGreaterThan(ai.evalPos(own, "b") + 5);
+  });
+
+  it("堵岸把敌方金鸡锁在一侧后，逼近围杀更有价值", () => {
+    /* 黑方双岸堵岸：红鸡被锁在 y≥4 一侧，黑方虎从 y=7 逼近 */
+    const black = [[xy2i(1, 4), 3], [xy2i(4, 4), LEOPARD], [xy2i(1, 7), 5]];
+    const near = mk([[xy2i(1, 5), ROOSTER]], [...black]);
+    const far = mk([[xy2i(4, 5), ROOSTER]], [...black]);
+    expect(ai.evalPos(near, "b")).toBeGreaterThan(ai.evalPos(far, "b") + 3);
+  });
+
+  it("未堵岸时，金鸡可全盘飞行，不奖励盲目逼近", () => {
+    const near = mk([[xy2i(2, 6), 5]], [[xy2i(1, 5), ROOSTER]]);
+    const far = mk([[xy2i(2, 6), 5]], [[xy2i(3, 5), ROOSTER]]);
+    /* 两处距离相同（都是 2），但都没有围杀条件，分数应保持一致 */
+    expect(ai.evalPos(near, "r")).toBeCloseTo(ai.evalPos(far, "r"), 6);
+  });
+
+  it("领先时把敌子逼到边角、保留闲棋更有利", () => {
+    const reds = [[xy2i(1, 7), 2], [xy2i(4, 7), 3]];
+    const cornered = mk(reds, [[xy2i(1, 1), 8]]);
+    const centered = mk(reds, [[xy2i(2, 3), 8]]);
+    expect(ai.evalPos(cornered, "r")).toBeGreaterThan(ai.evalPos(centered, "r") + 3);
+  });
+});
+
 describe("优势残局收束（Demo dmvbz53xwj2t1x 回归）", () => {
   /* 这盘 Demo 在第 118 手时黑方多出龙、麒麟、狮、虎、狸、鼠，
      却因为 AI 原地兜圈，最终连续 60 手无吃子判和。现在要求：

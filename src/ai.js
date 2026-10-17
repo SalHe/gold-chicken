@@ -152,6 +152,14 @@ export function attackGain(g, from, to, ctx){
 }
 
 function otherColor(c){ return c === "r" ? "b" : "r"; }
+/* 是否已进入敌方半场：红方的敌场在河下（y≥5），黑方在河上（y≤3）。 */
+function enemyHalf(col, i){ var y = xy(i).y; return col === "r" ? y >= 5 : y <= 3; }
+/* 两格是否在河界同一侧；河/岸（y=4）上的子两侧都够得着，视为同侧。 */
+function sameBankSide(a, b){
+  var ya = xy(a).y, yb = xy(b).y;
+  if (ya === 4 || yb === 4) return true;
+  return (ya <= 3) === (yb <= 3);
+}
 
 /* ---------- 估值 ---------- */
 /* 只依据「已翻开」的信息估值（暗棋身份不参与任何计算） */
@@ -253,6 +261,24 @@ export function evalPos(g, col){
     }
   }
 
+  /* 围杀敌方金鸡：金鸡是己方龙唯一的克星，也是全场最弱的子。
+     但金鸡能全盘飞行，单靠逼近毫无意义——只有己方堵岸把它锁在
+     河界一侧、且猎手与它同处一侧时，收紧包围才有价值。 */
+  if (opRooster >= 0 && ctx.bl === col){
+    var rx = xy(opRooster).x, ry = xy(opRooster).y;
+    for (i = 0; i < mine.length; i++){
+      var hunter = g.board[mine[i]];
+      if (hunter.t === ROOSTER || hunter.t === DRAGON) continue;
+      if (!canEat(hunter, g.board[opRooster])) continue;
+      if (!sameBankSide(mine[i], opRooster)) continue;
+      var hc = xy(mine[i]);
+      var rd = Math.abs(hc.x - rx) + Math.abs(hc.y - ry);
+      if (rd === 1) s += 12;
+      else if (rd === 2) s += 4;
+      else if (rd === 3) s += 1.5;
+    }
+  }
+
   /* 无吃子手数逼近上限：领先方必须主动收束，否则判和等于输。
      吃子会把 noCap 归零，因此这一项会自然把 AI 推向能兑现的着法。 */
   var lead = myMat - opMat;
@@ -292,6 +318,21 @@ export function evalPos(g, col){
   for (i = 0; i < theirs.length; i++) opMob += Math.min(mvs[theirs[i]].length, 20);
   s += (myMob - opMob) * 0.3;
 
+  /* 逼角与走闲棋：领先且对方只剩一两枚子时，把它往边角赶，
+     压缩它的活动空间；机动性差就是「闲棋」的资本——我方有得等，
+     对方没得等，只能先走进我方能吃到的范围（楚格茨旺）。 */
+  if (lead > 50 && theirs.length && theirs.length <= 2){
+    for (i = 0; i < theirs.length; i++){
+      var tq = g.board[theirs[i]];
+      if (tq.t === ROOSTER) continue;      /* 金鸡全盘飞行，逼角对它无效 */
+      var txy = xy(theirs[i]);
+      var edge = Math.min(txy.x - 1, W - txy.x, txy.y - 1, H - txy.y);
+      if (edge === 0) s += 5;              /* 已贴边/角，活动空间被压缩 */
+    }
+    var tempo = myMob - opMob;
+    if (tempo > 0) s += Math.min(tempo, 6) * 0.6;
+  }
+
   /* 准备着法的价值：下一步能走到某个敌子旁边（再下一步可吃），
      这类「逼近威胁」不直接兑现，却正是清障、包抄、追猎的组成部分。
      只计目前还吃不到的目标，避免与上面的即时威胁重复；无吃子手数
@@ -330,6 +371,17 @@ export function evalPos(g, col){
       } else {
         s += 1.0;               /* 被敌方堵岸冰封：仍然安全，但失去机动 */
       }
+    }
+  }
+
+  /* 己方堵岸时，河是自己的口岸：龙、象可以安全横渡到对岸，
+     从敌方半场发起进攻。已经跨过河界的龙/象，比赖在河里或
+     缩在自家半场更主动。 */
+  if (ctx.bl === col){
+    for (i = 0; i < mine.length; i++){
+      p = g.board[mine[i]];
+      if (p.t !== DRAGON && p.t !== ELEPHANT) continue;
+      if (enemyHalf(col, mine[i])) s += 5 + 0.05 * VAL[p.t];
     }
   }
 
