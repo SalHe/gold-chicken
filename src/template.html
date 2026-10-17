@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>金鸡斗兽棋</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;700;900&display=swap">
+<style>/*__CSS__*/</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>金鸡斗兽棋</h1>
+  <div class="tag">4 × 7 · 河界 · 翻棋定阵营</div>
+  <div class="spacer"></div>
+  <div class="seg" role="group" aria-label="对战模式">
+    <button id="mPvp" aria-pressed="true">双人对弈</button>
+    <button id="mAi" aria-pressed="false">人机对弈</button>
+  </div>
+</div>
+
+<div class="layout">
+  <div class="boardcol">
+    <div class="boardframe">
+      <div class="axis-x"><span>1</span><span>2</span><span>3</span><span>4</span></div>
+      <div class="midrow">
+        <div class="axis-y"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span></div>
+        <div class="board">
+          <div class="stack" id="stack">
+            <div class="grid" id="grid"></div>
+            <div class="pieces" id="pieces"></div>
+          </div>
+          <div class="victory" id="victory" hidden>
+            <div class="vcard">
+              <div class="vbadge" id="vBadge">胜</div>
+              <div class="vtitle" id="vTitle"></div>
+              <div class="vwhy" id="vWhy"></div>
+              <button class="vbtn" id="vBtn">再来一盘</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="hint" id="hint"></div>
+  </div>
+
+  <aside class="panel">
+    <div class="card">
+      <div class="status">
+        <span class="dot none" id="turnDot"></span>
+        <span class="who" id="turnWho">等待开局</span>
+        <span class="sub" id="turnSub"></span>
+      </div>
+      <div class="sides">
+        <div class="side" id="sideR">
+          <b><span class="dot red"></span><span id="labelR">红方</span></b>
+          <span class="n" id="countR">12</span>
+          <span class="r">存子</span>
+        </div>
+        <div class="side" id="sideB">
+          <b><span class="dot black"></span><span id="labelB">黑方</span></b>
+          <span class="n" id="countB">12</span>
+          <span class="r">存子</span>
+        </div>
+      </div>
+      <div class="graveyard" id="graveR"></div>
+      <div class="graveyard" id="graveB"></div>
+    </div>
+
+    <div class="banner" id="banner" hidden><span class="ic">堵</span><span id="bannerTxt"></span></div>
+
+    <div class="card">
+      <h2 class="t">行棋记录</h2>
+      <div class="log" id="log"></div>
+    </div>
+
+    <div class="card">
+      <h2 class="t">操作</h2>
+      <div class="btns">
+        <button class="act primary" id="btnNew">重新开局</button>
+        <button class="act" id="btnUndo">悔棋</button>
+        <button class="act" id="btnRules">规则详解</button>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<div class="modal" id="modal" hidden>
+  <div class="veil" data-close></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="rulesTitle">
+    <button class="act close" data-close>关闭</button>
+    <h3 id="rulesTitle">规则详解</h3>
+    <p class="lead">四列七行的窄棋盘，河界横贯正中。开局全部盖着，先手翻出的那枚棋子，就决定了两家的阵营。</p>
+
+    <h4>棋盘</h4>
+    <p>X 取 1–4，Y 取 1–7。Y=4 一整行为河界：X=1、X=4 是「岸」，X=2、X=3 是「河」。全盘 28 格，扣掉两格河、两格岸，其余 24 格是普通陆地。</p>
+
+    <h4>棋子与大小</h4>
+    <p>双方各十二枚，由强到弱依次是：</p>
+    <div class="rank">
+      <span>一 龙</span><span>二 麒麟</span><span>三 狮</span><span>四 象</span><span>五 虎</span><span>六 豹</span><span>七 狼</span><span>八 狗</span><span>九 狸</span><span>十 猫</span><span>十一 鼠</span><span>十二 金鸡</span>
+    </div>
+    <p>靠前的能吃靠后的。<b>同子相吃就是「邀兑」——两子同归于尽</b>，吃子方不会留在原地：把子走到同阶敌子旁边，等于向对方提出兑子，接不接由对方决定。两个例外：<b>龙吃不了金鸡，金鸡却能吃龙</b>；这是大小顺序上的例外而非同子，所以金鸡吃龙之后安然无恙。</p>
+
+    <h4>走法</h4>
+    <ul>
+      <li>除金鸡外，所有棋子每次走一格，横竖皆可，不能走斜线。</li>
+      <li><b>金鸡</b>可以任意飞行，落点不受距离与阻挡限制。</li>
+      <li>一格只能有一个棋子。</li>
+      <li><b>自残：</b>可以吃掉己方棋子，同样遵循大小顺序——大的吃小的；同阶自残则两子同亡。棋盘开局铺满，这常用来解开拥堵。己方目标格显示<em>金色虚线</em>；<b>需再点一次同一格确认</b>，此时该子会闪出<b>骷髅头</b>并套上红圈，提醒你这一手要吃掉自己人。</li>
+    </ul>
+
+    <h4>岸与河</h4>
+    <ul>
+      <li><b>龙上岸会被渴死。</b>龙走进任一「岸」格，当即阵亡（即便那一格上有它能吃掉的敌子，吃子之后仍然渴死）。</li>
+      <li><b>下河：</b>只有龙和象能进「河」格，其余棋子进不去（也不会淹死，只是走不进去）。</li>
+      <li>岸是陆地，除龙以外的任何棋子都可以自由停留。</li>
+      <li><b>河是口岸，不是通道：</b>「河」只有 (2,4)、(3,4) 两格，棋子不能从一格河走到另一格河。但从河里出来时，可以朝河边<b>任意方向出水</b>——两个「岸」都能上，紧挨着河的 4 格陆地也都能走，共 <b>6 个出口</b>，与它此刻待在哪一格河无关。（进河仍是普通的走一步，只有出水享受这个待遇。）</li>
+      <li><b>河中受困：</b>一旦敌方堵岸，两岸都落到敌人手里，河水的进出口就全被封死——<b>己方尚在「河」里的棋子从此动弹不得</b>，直到堵岸被拆掉为止。</li>
+    </ul>
+
+    <h4>堵岸</h4>
+    <p>同一方的棋子同时占住两个「岸」格，就构成<b>堵岸</b>。效果有四：</p>
+    <ul>
+      <li>占据两岸的那两枚棋子<b>免疫敌方攻击</b>，敌子吃不掉它们。</li>
+      <li>敌方金鸡<b>不能飞越河界</b>。己方占住岸时，只有对手的金鸡被拦住；己方金鸡照飞不误。</li>
+      <li>敌方留在「河」里的棋子被<b>封死在河中</b>，不能移动。</li>
+      <li>此时双方任意一方的<b>豹都可以下河</b>，并引爆。</li>
+    </ul>
+
+    <h4>豹的引爆</h4>
+    <p>河界被堵住时，豹可以走一步进入「河」格（目标河格必须是空的），落水即刻引爆：<b>Y=3、Y=4、Y=5 三行上的所有棋子全部阵亡，不分敌我，豹自己也在其中。</b>这是拆掉堵岸的唯一硬办法。</p>
+    <p>因为这一手很可能连带炸掉自己人，落点会先标成 <b>✸</b> 并显示波及范围，<b>必须再点一次同一格才真正引爆</b>；确认前，Y3–Y5 上所有将被炸掉的棋子会套上<b>搏动的红圈</b>，豹自己闪出<b>骷髅头</b>，提示框同时报出「己方几枚、敌方几枚、暗棋几枚」。</p>
+
+    <h4>翻棋与阵营</h4>
+    <ul>
+      <li>开局 24 枚棋子随机盖在 24 个普通陆地格上，<b>河界与两岸一律留空</b>，棋盘刚好铺满、没有空位。</li>
+      <li>因此开局无子可走，双方只能翻棋或自残解堵；随着翻开的棋子互相吃掉，棋盘才会松开。</li>
+      <li>先手的第一手必须翻棋，翻出来的颜色就是先手方的阵营，另一方自动执另一色。</li>
+      <li>盖着的棋子不能移动，也不能被吃——想吃它，先翻开。翻开的身份对双方同时公开。</li>
+      <li>因此棋盘信息对两家完全对称，同一块屏幕即可对局，无需隐藏。</li>
+    </ul>
+
+    <h4>胜负与和棋</h4>
+    <ul>
+      <li><b>胜：</b>吃光对方全部棋子（含尚未翻开的）。</li>
+      <li><b>困毙：</b>轮到某方无棋可走（无子可动、也无暗棋可翻），该方判负。</li>
+      <li><b>和棋：</b>连续 60 手无任何吃子；或全盘翻开后双方任何两枚棋子都无法互吃（死局）。</li>
+    </ul>
+
+    <div class="note">
+      <b>判定说明</b>（规则原文未明确处的取法）：同子相吃双方同时阵亡，自残同阶亦然；堵岸的免疫只作用于占住两岸的那两枚棋子，不是全队免疫；堵岸以「已翻开的棋子」为准，暗棋占岸不算数，翻开后即时生效；豹引爆只能落入空河格；金鸡飞行虽不受阻挡，但落点仍不能是「河」格；「河中受困」按字面取全封——敌方一旦堵岸，己方河中之子连那 6 个出口也一并封住，完全不能动，直到堵岸被拆；本方的堵岸不会封住本方的河中之子；「出水」只优待河中之子，从陆地进河仍按普通一步走（例如 (3,3) 是斜角，进不了 (2,4)）。
+    </div>
+  </div>
+</div>
+
+<script>/*__JS__*/</script>
+</body>
+</html>

@@ -1,0 +1,201 @@
+/* 纯规则：全部以 `g` 为参数，读常量，不读模块状态、不碰 DOM。 */
+import {
+  W, H, N, DRAGON, ELEPHANT, LEOPARD, ROOSTER, NAME, NUM, DIRS
+} from "./constants.js";
+
+export function xy(i){ return { x: i % W + 1, y: (i / W | 0) + 1 }; }
+export function id(x, y){ return (y - 1) * W + (x - 1); }
+export function terrain(x, y){ return y === 4 ? ((x === 1 || x === 4) ? "bank" : "river") : "land"; }
+export function isBank(i){ var c = xy(i); return terrain(c.x, c.y) === "bank"; }
+export function isRiver(i){ var c = xy(i); return terrain(c.x, c.y) === "river"; }
+/* 是否紧挨着「河」——上下左右任一边邻着河格，即算河口 */
+export function touchesRiver(i){
+  var c = xy(i);
+  for (var d = 0; d < 4; d++){
+    var nx = c.x + DIRS[d][0], ny = c.y + DIRS[d][1];
+    if (nx < 1 || nx > W || ny < 1 || ny > H) continue;
+    if (isRiver(id(nx, ny))) return true;
+  }
+  return false;
+}
+export function pname(p){ return NUM[p.t] + NAME[p.t]; }
+export function posName(i){ var c = xy(i); return "(" + c.x + "," + c.y + ")"; }
+export function shuffle(a){ for (var i = a.length - 1; i > 0; i--){ var j = Math.random() * (i + 1) | 0; var t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+
+export function blockadeColor(g){
+  var a = g.board[id(1, 4)], b = g.board[id(4, 4)];
+  if (a && b && a.rv && b.rv && a.c === b.c) return a.c;
+  return null;
+}
+export function isImmune(g, p, i){
+  if (!p || !p.rv) return false;
+  var bl = blockadeColor(g);
+  return bl !== null && bl === p.c && isBank(i) && (i === id(1, 4) || i === id(4, 4));
+}
+/* 甲能否吃乙：靠前的吃靠后的，同阶可互吃（邀兑） */
+export function canEat(a, d){
+  if (a.t === DRAGON && d.t === ROOSTER) return false;
+  if (a.t === ROOSTER && d.t === DRAGON) return true;
+  return a.t <= d.t;
+}
+/* 落点判定 */
+export function landCheck(g, p, ti){
+  var q = g.board[ti];
+  if (!q) return { ok: true, kind: "move" };
+  if (!q.rv) return { ok: false };
+  if (isImmune(g, q, ti)) return { ok: false };
+  if (!canEat(p, q)) return { ok: false };
+  return { ok: true, kind: q.c === p.c ? "self" : "capture" };
+}
+export function crossesRiver(fromY, toY){
+  return (fromY < 4 && toY > 4) || (fromY > 4 && toY < 4);
+}
+/* 某枚棋子的全部合法着法 */
+export function movesFor(g, i){
+  var p = g.board[i];
+  if (!p || !p.rv) return [];
+  var out = [], c = xy(i), k, nx, ny, ni, lc, ct;
+  var inRiver = isRiver(i);
+  var bl = blockadeColor(g);
+
+  /* 河里的棋子被敌方堵岸封死：两岸都落在敌人手里，河水进出口全堵上，动弹不得 */
+  if (inRiver && bl !== null && bl !== p.c) return [];
+
+  if (p.t === ROOSTER){                       /* 金鸡：任意飞行 */
+    var restrict = bl !== null && bl !== p.c;
+    for (k = 0; k < N; k++){
+      if (k === i) continue;
+      if (isRiver(k)) continue;               /* 落点不能是河 */
+      var tc = xy(k);
+      if (restrict && crossesRiver(c.y, tc.y)) continue;
+      lc = landCheck(g, p, k);
+      if (lc.ok) out.push({ from: i, to: k, kind: lc.kind });
+    }
+    return out;
+  }
+
+  /* 河中棋子：河是「口岸」不是通道——出来时朝河边任意方向出水，
+     两个岸都能上，紧挨着河的 4 格陆地也都能走，共 6 个出口，
+     与它此刻待在哪一格河无关；唯独不能游进另一格河。 */
+  if (inRiver){
+    for (k = 0; k < N; k++){
+      if (k === i || isRiver(k) || !touchesRiver(k)) continue;
+      lc = landCheck(g, p, k);
+      if (lc.ok){
+        out.push({ from: i, to: k, kind: (p.t === DRAGON && isBank(k)) ? "thirst" : lc.kind });
+      }
+    }
+    return out;
+  }
+
+  for (k = 0; k < 4; k++){
+    nx = c.x + DIRS[k][0]; ny = c.y + DIRS[k][1];
+    if (nx < 1 || nx > W || ny < 1 || ny > H) continue;
+    ni = id(nx, ny); ct = terrain(nx, ny);
+
+    if (ct === "river"){
+      if (p.t === DRAGON || p.t === ELEPHANT){        /* 龙、象可下河 */
+        lc = landCheck(g, p, ni);
+        if (lc.ok) out.push({ from: i, to: ni, kind: lc.kind });
+      } else if (p.t === LEOPARD && bl){              /* 堵岸时豹可下河引爆 */
+        if (!g.board[ni]) out.push({ from: i, to: ni, kind: "dive" });
+      }
+      continue;
+    }
+    lc = landCheck(g, p, ni);
+    if (lc.ok){
+      out.push({ from: i, to: ni, kind: (p.t === DRAGON && ct === "bank") ? "thirst" : lc.kind });
+    }
+  }
+  return out;
+}
+export function allActions(g, pi){
+  var col = g.pcolor[pi], out = [], i, p;
+  for (i = 0; i < N; i++){
+    p = g.board[i];
+    if (!p) continue;
+    if (!p.rv){ out.push({ kind: "flip", i: i }); continue; }
+    if (col && p.c === col){
+      var ms = movesFor(g, i);
+      for (var j = 0; j < ms.length; j++) out.push(ms[j]);
+    }
+  }
+  return out;
+}
+export function counts(g){
+  var r = 0, b = 0;
+  for (var i = 0; i < N; i++){
+    var p = g.board[i];
+    if (!p) continue;
+    if (p.c === "r") r++; else b++;
+  }
+  return { r: r, b: b };
+}
+
+export function kill(g, i, reason){
+  var p = g.board[i];
+  if (!p) return null;
+  g.caps[p.c].push(p.t);
+  g.board[i] = null;
+  return p;
+}
+export function applyMove(g, a){
+  var p = g.board[a.from];
+  var q = g.board[a.to];
+  var events = [];
+  if (q){
+    g.caps[q.c].push(q.t);
+    events.push({ type: "eat", p: q, self: q.c === p.c, at: a.to });
+  }
+  g.board[a.from] = null;
+  g.board[a.to] = p;
+
+  /* 同子邀兑：同归于尽，吃子方也一并阵亡 */
+  if (q && q.t === p.t){
+    g.caps[p.c].push(p.t);
+    g.board[a.to] = null;
+    events.push({ type: "trade", p: p, at: a.to });
+  }
+
+  if (a.kind === "thirst"){
+    var dead = kill(g, a.to, "thirst");
+    events.push({ type: "thirst", p: dead, at: a.to });
+  } else if (a.kind === "dive"){
+    var lost = [];
+    for (var i = 0; i < N; i++){
+      var c = xy(i);
+      if (c.y >= 3 && c.y <= 5 && g.board[i]) lost.push({ p: kill(g, i), at: i });
+    }
+    events.push({ type: "boom", at: a.to, lost: lost });
+  }
+  return events;
+}
+
+export function deadPosition(g){
+  var i, j, p, q;
+  for (i = 0; i < N; i++){
+    p = g.board[i];
+    if (!p) continue;
+    if (!p.rv) return false;              /* 还有暗棋，未定 */
+  }
+  /* 豹还能引爆则不算死局 */
+  if (blockadeColor(g)){
+    for (i = 0; i < N; i++){
+      p = g.board[i];
+      if (p && p.rv && p.t === LEOPARD){
+        var ms = movesFor(g, i);
+        for (j = 0; j < ms.length; j++) if (ms[j].kind === "dive") return false;
+      }
+    }
+  }
+  for (i = 0; i < N; i++){
+    p = g.board[i];
+    if (!p || p.c !== "r") continue;
+    for (j = 0; j < N; j++){
+      q = g.board[j];
+      if (!q || q.c !== "b") continue;
+      if (canEat(p, q) || canEat(q, p)) return false;
+    }
+  }
+  return true;
+}
