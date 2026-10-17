@@ -312,6 +312,37 @@ export function evalPos(g, col){
     s += prox * Math.min(lead, 300) / 300;
   }
 
+  /* 多子绞杀：领先时不必把兵力都堆在同一个目标上。让不同的子同时
+     压住不同的敌子，对手可走的闲棋就更少——小子好收，先收小子，
+     大子留到最后，此时对手的闲棋已经不多，更容易被逼进吃口。
+     按「目标」计分：同一个目标有再多猎手也只算一次（两面夹击
+     另有小加成），避免扎堆追杀；多个目标同时被压住另加一笔。 */
+  if (lead > 50 && theirs.length >= 2){
+    var covered = 0, coord = 0;
+    for (i = 0; i < theirs.length; i++){
+      var cq = g.board[theirs[i]];
+      if (cq.t === ROOSTER) continue;        /* 金鸡会飞，围不住 */
+      var bestD = 99, guards = 0, ci;
+      for (ci = 0; ci < mine.length; ci++){
+        var cp = g.board[mine[ci]];
+        if (cp.t === ROOSTER) continue;
+        if (!canEat(cp, cq) || cq.t < cp.t) continue;
+        if (!sameBankSide(mine[ci], theirs[i])) continue;
+        var cc = xy(mine[ci]), tc = xy(theirs[i]);
+        var cd = Math.abs(cc.x - tc.x) + Math.abs(cc.y - tc.y);
+        if (cd < bestD) bestD = cd;
+        if (cd <= 2) guards++;
+      }
+      if (bestD > 3) continue;
+      covered++;
+      coord += bestD === 1 ? 8 : (bestD === 2 ? 3 : 1);
+      if (guards >= 2) coord += 3;           /* 两面夹击，逃格被压缩 */
+      if (VAL[cq.t] <= 22) coord += 1.5;     /* 小子更好收，先拿小的 */
+    }
+    if (covered >= 2) coord += 6;            /* 同时压住多枚敌子 */
+    if (coord) s += coord * Math.min(lead, 300) / 300;
+  }
+
   /* 机动性：金鸡的全盘飞行也会体现在这里 */
   var myMob = 0, opMob = 0;
   for (i = 0; i < mine.length; i++) myMob += Math.min(mvs[mine[i]].length, 20);

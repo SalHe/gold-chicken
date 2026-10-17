@@ -147,6 +147,15 @@ describe("残局技术", () => {
     const centered = mk(reds, [[xy2i(2, 3), 8]]);
     expect(ai.evalPos(cornered, "r")).toBeGreaterThan(ai.evalPos(centered, "r") + 3);
   });
+
+  it("多子分头绞杀不同目标，比全堆在一个目标上更有利", () => {
+    /* 红方一鼠一猫：分头压住时，两枚敌子同时被盯死；
+       扎堆在鼠旁边时，猫还完全自由——前者才是绞杀。 */
+    const reds = [[xy2i(1, 5), 11], [xy2i(4, 7), 10]];
+    const spread = mk(reds, [[xy2i(1, 6), 3], [xy2i(4, 6), 5]]);
+    const stacked = mk(reds, [[xy2i(1, 6), 3], [xy2i(2, 5), 5]]);
+    expect(ai.evalPos(spread, "b")).toBeGreaterThan(ai.evalPos(stacked, "b") + 2);
+  });
 });
 
 describe("优势残局收束（Demo dmvbz53xwj2t1x 回归）", () => {
