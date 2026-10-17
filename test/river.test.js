@@ -75,6 +75,17 @@ describe("河格压子", () => {
     expect(G.log[G.log.length - 1].h).toContain("压住");
   });
 
+  it("豹只能从陆地跳河引爆，不能从岸上下河", () => {
+    const bank = xy2i(1, 4), bank2 = xy2i(4, 4), land = xy2i(2, 3);
+    /* 岸上的豹：不得跳入相邻河格 */
+    state.setGame(mk([[bank, LEOPARD], [bank2, 3]], []));
+    expect(rules.movesFor(state.getGame(), bank).some(m => m.kind === "dive")).toBe(false);
+    /* 陆地上的豹：可以跳入相邻河格 */
+    state.setGame(mk([[land, LEOPARD], [bank, 3], [bank2, 3]], []));
+    const dive = rules.movesFor(state.getGame(), land).find(m => m.kind === "dive");
+    expect(dive && dive.to).toBe(to);
+  });
+
   it("引爆会炸掉河格上下两层", () => {
     const L = xy2i(1, 4), R = xy2i(4, 4), lp = xy2i(2, 3);
     const stack = xy2i(3, 4);

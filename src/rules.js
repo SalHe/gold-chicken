@@ -109,7 +109,7 @@ export function movesFor(g, i){
       if (p.t === DRAGON || p.t === ELEPHANT){        /* 龙、象可下河；遇到敌子则压住 */
         lc = riverCheck(g, p, ni);
         if (lc.ok) out.push({ from: i, to: ni, kind: lc.kind });
-      } else if (p.t === LEOPARD && bl){              /* 堵岸时豹可下河引爆 */
+      } else if (p.t === LEOPARD && bl && !isBank(i)){ /* 堵岸时豹可从陆地跳河引爆；岸上不行 */
         if (!g.board[ni]) out.push({ from: i, to: ni, kind: "dive" });
       }
       continue;
