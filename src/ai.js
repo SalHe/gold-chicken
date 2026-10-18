@@ -153,6 +153,17 @@ export function attackGain(g, from, to, ctx){
 }
 
 function otherColor(c){ return c === "r" ? "b" : "r"; }
+/* 只按已翻开的棋子算子力差：暗棋身份不可读，双方都不计入。 */
+function materialLead(g, col){
+  var mine = 0, op = 0, i, p;
+  for (i = 0; i < N; i++){
+    p = g.board[i];
+    if (!p) continue;
+    if (p.rv){ if (p.c === col) mine += VAL[p.t]; else op += VAL[p.t]; }
+    if (p.under){ if (p.under.c === col) mine += VAL[p.under.t]; else op += VAL[p.under.t]; }
+  }
+  return mine - op;
+}
 /* 是否已进入敌方半场：红方的敌场在河下（y≥5），黑方在河上（y≤3）。 */
 function enemyHalf(col, i){ var y = xy(i).y; return col === "r" ? y >= 5 : y <= 3; }
 /* 两格是否在河界同一侧；河/岸（y=4）上的子两侧都够得着，视为同侧。 */
@@ -970,6 +981,19 @@ export function aiPick(g, pi, opts){
   var pool = hiddenPool(g);
   var scored = [], i, act, sc;
 
+  /* 无吃子手数逼近 60 手：领先方被判和等于输。此时翻开暗棋是打破
+     僵局的唯一手段——翻开可能得到己方强子，也可能让挡路的敌子变成
+     可吃目标。静态估值看不到这层「未来兑现」，翻棋会一直略输于
+     原地腾挪，于是双方在残局里来回兜圈。给接近上限时的翻棋加一笔
+     随子力优势放大的紧迫分，让领先方主动去开锁。 */
+  var flipUrgency = 0;
+  if (g.noCap >= 40){
+    var leadNow = materialLead(g, col);
+    if (leadNow > 0){
+      flipUrgency = (g.noCap - 40) * Math.min(1, leadNow / 150);
+    }
+  }
+
   /* 一步制胜就直接兑现：搜索能算出「三步后必胜」，
      但有立即结束的着法时没有理由再兜圈子。 */
   var instant = [];
@@ -999,7 +1023,7 @@ export function aiPick(g, pi, opts){
            固定的小正数：局面估值常常是几百的负数，那会让 AI 永远翻棋。 */
         sc = pool && pool.length ? expectedFlip(g, pi, act.i, pool)
                                  : evalPos(g, col);
-        sc += Math.random() * 0.3;
+        sc += flipUrgency + Math.random() * 0.3;
       } else {
         sc = onePlyScore(g, pi, act, col);
         sc += Math.random() * 0.05;
@@ -1008,20 +1032,29 @@ export function aiPick(g, pi, opts){
     }
   }
 
-  /* 重复局面惩罚：优势方最忌讳在残局里来回兜圈，
-     同一公开局面在近期出现过就扣分（只回看最近 16 个局面）。 */
+  /* 重复局面惩罚：优势方最忌讳在残局里来回兜圈。落后方则相反——
+     原地兜圈把棋局拖到 60 手判和，正是它最便宜的防守。所以这一项
+     只对领先方生效，并随无吃子手数逼近上限而加重：领先方必须主动
+     打破循环，哪怕弃掉被长捉的子——弃子会重置吃子计数，也让压在
+     手里的子力重新获得兑现的机会。
+     注意：历史局面记录的是换手后的状态，因此比较前要先翻转 turn；
+     否则键里带着行棋方，重复局面永远匹配不上（这一项曾是死代码）。 */
   var history = opts.history;
-  if (history && history.length){
+  var repLead = materialLead(g, col);
+  if (history && history.length && repLead > 0){
+    var repGap = g.noCap > 30 ? g.noCap - 30 : 0;
+    var repW = (6 + repGap * 3) * Math.min(1, repLead / 150);
     for (i = 0; i < scored.length; i++){
       act = scored[i].a;
       if (act.kind === "flip") continue;
       var hg = cloneG(g);
       applyAction(hg, act);
+      hg.turn = 1 - hg.turn;
       var key = positionKey(hg), hits = 0;
       for (var h = history.length - 1; h >= 0 && h >= history.length - 16; h--){
         if (history[h] === key) hits++;
       }
-      if (hits) scored[i].sc -= 6 * hits;
+      if (hits) scored[i].sc -= repW * hits;
     }
   }
 
