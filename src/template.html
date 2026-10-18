@@ -47,6 +47,8 @@
               <div class="vwhy" id="vWhy"></div>
               <div class="vacts">
                 <button class="vbtn" id="vBtn">再来一盘</button>
+                <button class="vbtn ghost" id="vReplay" title="从开局逐手回看本局">复盘本局</button>
+                <button class="vbtn ghost" id="vCopyDemo" title="复制本局的 Demo JSON">复制 Demo</button>
                 <button class="vbtn ghost" id="vPeek" title="按住查看棋局，松开恢复">按住查看棋局</button>
                 <button class="vbtn ghost" id="vClose" title="关闭结束界面；棋局保持只读">关闭</button>
               </div>
@@ -56,6 +58,11 @@
       </div>
     </div>
     <div class="hint" id="hint"></div>
+    <div class="quickbar" id="quickBar">
+      <button class="qb" id="qbUndo">悔棋</button>
+      <button class="qb" id="qbNew">重新开局</button>
+      <button class="qb" id="qbRules">规则</button>
+    </div>
     <div class="replaybar" id="replayBar" hidden>
       <span class="rp-info" id="replayInfo"></span>
       <button class="rp-btn" id="btnReplayBack">上一步</button>
@@ -197,6 +204,18 @@
 
     <div class="note">
       <b>判定说明</b>（规则原文未明确处的取法）：同子相吃双方同时阵亡，自残同阶亦然；堵岸的免疫只作用于占住两岸的那两枚棋子，不是全队免疫；堵岸以「已翻开的棋子」为准，暗棋占岸不算数，翻开后即时生效；豹引爆只能从紧挨河界的陆地跳入河格（四格河边陆地都可，两个河格任选，河格上有棋子也能跳），不能从「岸」格下河；金鸡飞行虽不受阻挡，但落点仍不能是「河」格；「河中受困」按字面取全封——敌方一旦堵岸，己方河中之子连那 6 个出口也一并封住，完全不能动，直到堵岸被拆；本方的堵岸不会封住本方的河中之子；「出水」只优待河中之子；进河时，龙、象可以从四格河边陆地正走或斜走进任一河格（岸上的子只能进正对的那一格河）；河中被压的棋子仍计入存子，也不会造成「吃光」或将死判定；豹引爆时，河格中压着的上下两枚棋子一并阵亡；死局判定中只要河里还有被压的棋子，就不算死局。
+    </div>
+  </div>
+</div>
+
+<div class="confirm" id="confirm" hidden>
+  <div class="veil" data-cancel></div>
+  <div class="cbox" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <h3 id="confirmTitle">重新开局？</h3>
+    <p id="confirmMsg">当前对局尚未结束，重新开局会清空本局进度和悔棋记录（已保存的 Demo 不受影响）。</p>
+    <div class="cacts">
+      <button class="act primary" id="confirmOk">重新开局</button>
+      <button class="act" id="confirmCancel">继续对局</button>
     </div>
   </div>
 </div>

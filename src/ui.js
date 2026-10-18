@@ -107,6 +107,7 @@ export function syncPieces(){
       return;
     }
     el.classList.toggle("sel", i === sel);
+    el.classList.toggle("last", !!(g.last && g.last.to === i));
     var isCap = false, isSelf = false;
     curMoves.forEach(function(m){
       if (m.to !== i) return;
@@ -154,10 +155,11 @@ export function renderCells(){
   }
   var bl = blockadeColor(g);
   for (var i = 0; i < N; i++){
-    var d = cellEls[i], cls = d.className.replace(/\s*(mv|press|thirst|boom|sel|last|blockade)\b/g, "");
+    var d = cellEls[i], cls = d.className.replace(/\s*(mv|press|thirst|boom|sel|last-from|last-to|last|blockade)\b/g, "");
     if (mv[i]) cls += " " + mv[i];
     if (i === getSel()) cls += " sel";
-    if (g.last && (i === g.last.from || i === g.last.to)) cls += " last";
+    if (g.last && i === g.last.from) cls += " last-from";
+    else if (g.last && i === g.last.to) cls += " last-to";
     if (bl && isBank(i)){
       var p = g.board[i];
       if (p && p.rv && p.c === bl) cls += " blockade";
@@ -206,6 +208,8 @@ export function isVictoryDismissed(){
   var g = getGame();
   return !!(g && g.result && dismissedResult === g.result);
 }
+/* 离开回放时用：让「本局已结束」的告示重新接管，回到只读终局 */
+export function clearVictoryDismissed(){ dismissedResult = null; }
 /* 终局大告示：铺满棋盘的一张牌，压过其它所有提示 */
 export function renderVictory(){
   var g = getGame();
@@ -233,6 +237,11 @@ export function renderVictory(){
   document.getElementById("vBadge").textContent = badge;
   document.getElementById("vTitle").textContent = title;
   document.getElementById("vWhy").textContent = why;
+  /* 复盘/复制都依赖本局的走子序列；极短的异常对局没有可复盘的着法时禁用。
+     回放中的「复制」没有可导出的活棋局（currentDemo 会返回 null），一并禁用。 */
+  var hasDemo = getActions().length > 0;
+  document.getElementById("vReplay").disabled = !hasDemo;
+  document.getElementById("vCopyDemo").disabled = !hasDemo || isReplaying();
   v.hidden = false;
 }
 export function renderPanel(){
@@ -253,6 +262,7 @@ export function renderPanel(){
   var who = document.getElementById("turnWho");
   var sub = document.getElementById("turnSub");
   var cur = g.pcolor[g.turn];
+  var turnLabel = cur === "r" ? "红方" : (cur === "b" ? "黑方" : "");
   dot.className = "dot " + (cur || "none");
   if (g.result){
     dot.className = "dot none";
@@ -302,12 +312,14 @@ export function renderPanel(){
       : "点击任意一枚盖着的棋子翻开 · 先手翻出的颜色即先手方阵营";
   } else if (mode === "aiai"){
     hint.textContent = getAiPaused()
-      ? "单步模式 · 点「单步」走一手，「自动」恢复连走，「悔棋」可回退"
-      : "电脑对弈进行中 · 点「单步」可暂停并逐手查看";
+      ? "单步模式 · 轮到" + turnLabel + " · 点「单步」走一手，「自动」恢复连走，「悔棋」可回退"
+      : "电脑对弈进行中 · 轮到" + turnLabel + " · 点「单步」可暂停并逐手查看";
   } else if (mode === "ai" && isAITurn()){
-    hint.textContent = "电脑思考中…";
+    hint.textContent = "电脑思考中… · 轮到" + turnLabel;
+  } else if (mode === "ai"){
+    hint.textContent = "轮到你 · " + turnLabel + "：点己方棋子选中，再点高亮格落子；点暗棋即翻开";
   } else {
-    hint.textContent = "点己方棋子选中，再点高亮格落子；点暗棋即翻开";
+    hint.textContent = "轮到" + turnLabel + "：点己方棋子选中，再点高亮格落子；点暗棋即翻开";
   }
 
   var bn = document.getElementById("banner");
@@ -336,9 +348,12 @@ export function renderPanel(){
   /* 行棋记录总是停在最新的一步 */
   lg.scrollTop = lg.scrollHeight;
 
-  document.getElementById("btnUndo").disabled =
-    getUndoStack().length === 0 || !!g.result || isReplaying() ||
+  var undoDisabled = getUndoStack().length === 0 || !!g.result || isReplaying() ||
     (mode === "aiai" && !getAiPaused());
+  document.getElementById("btnUndo").disabled = undoDisabled;
+  document.getElementById("qbUndo").disabled = undoDisabled;
+  /* 回放时底部已有专门的回放条，快捷操作条让位 */
+  document.getElementById("quickBar").hidden = isReplaying();
   document.getElementById("btnSaveDemo").disabled = isReplaying() || !getActions().length;
   document.getElementById("btnCopyDemo").disabled = isReplaying() || !getActions().length;
 
@@ -354,6 +369,10 @@ function esc(s){
 }
 function pad2(n){ return (n < 10 ? "0" : "") + n; }
 
+/* Demo 删除的二次确认状态放在渲染层，重绘（AI 行棋等）不会把「确认?」抹掉 */
+var demoDelConfirmId = null;
+export function setDemoDelConfirm(id){ demoDelConfirmId = id; }
+
 export function renderDemos(){
   var box = document.getElementById("demoList");
   var list = listDemos();
@@ -368,11 +387,14 @@ export function renderDemos(){
       (d.result.kind === "win"
         ? ((d.result.winner === "r" ? "红方" : "黑方") + "胜")
         : "和棋");
+    var confirming = d.id === demoDelConfirmId;
     return '<div class="demo">' +
       '<button class="demo-play" data-play="' + esc(d.id) + '" title="回放">▶</button>' +
       '<span class="demo-info"><b>' + esc(when) + "</b> · " + ((d.actions && d.actions.length) || 0) + " 手 · " + esc(res) + "</span>" +
       '<button class="demo-copy" data-copy="' + esc(d.id) + '" title="复制这一局的 JSON">复制</button>' +
-      '<button class="demo-del" data-del="' + esc(d.id) + '" title="删除">删</button>' +
+      '<button class="demo-del' + (confirming ? " confirming" : "") + '" data-del="' + esc(d.id) + '"'
+        + (confirming ? ' data-confirm="1"' : "") + ' title="' + (confirming ? "再点一次确认删除" : "删除") + '">'
+        + (confirming ? "确认?" : "删") + "</button>" +
     "</div>";
   }).join("");
 }

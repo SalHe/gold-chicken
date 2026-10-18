@@ -13,6 +13,8 @@ import {
 let aiTimer = null;
 let replayTimer = null;
 let replayDemo = null;
+/* 本次回放是否由结束界面的「复盘本局」发起；退出时要把终局告示还原 */
+let replayFromVictory = false;
 
 /* ---------- 剪贴板 ---------- */
 /* 异步剪贴板 API 在非安全上下文 / 部分浏览器里不可用，退回 execCommand。 */
@@ -119,6 +121,7 @@ function playDemo(d){
   stopAI();
   stopReplayTimer();
   if (isReplaying()) endReplay();
+  replayFromVictory = false;
   replayDemo = d;
   if (!beginReplay(d.start, d.actions)){
     replayDemo = null;
@@ -130,6 +133,11 @@ function playDemo(d){
 }
 function exitReplay(){
   stopReplayTimer();
+  /* 从结束界面进入的复盘：退出时把终局告示交还给只读的棋局 */
+  if (replayFromVictory){
+    replayFromVictory = false;
+    ui.clearVictoryDismissed();
+  }
   if (isReplaying()) endReplay();
   replayDemo = null;
   updateReplayButtons();
@@ -174,7 +182,53 @@ function start(){
     newGame();
   }
 
-  document.getElementById("btnNew").addEventListener("click", freshGame);
+  /* 重新开局会清空当前对局，有走子又未终局时先问一句 */
+  function requestNewGame(){
+    var g = getGame();
+    if (isReplaying() || !g || g.result || !getActions().length){ freshGame(); return; }
+    askConfirm("重新开局？",
+      "当前对局尚未结束。重新开局会清空本局进度和悔棋记录（已保存的 Demo 不受影响）。",
+      "重新开局", freshGame);
+  }
+
+  /* ---------- 二次确认弹层 ---------- */
+  var confirmEl = document.getElementById("confirm");
+  var confirmOk = document.getElementById("confirmOk");
+  var confirmCancel = document.getElementById("confirmCancel");
+  var confirmAction = null;
+  function askConfirm(title, msg, okText, fn){
+    /* 弹层期间暂停 AI，避免它在用户犹豫时继续落子；取消后再恢复 */
+    stopAI();
+    document.getElementById("confirmTitle").textContent = title;
+    document.getElementById("confirmMsg").textContent = msg;
+    confirmOk.textContent = okText;
+    confirmAction = fn;
+    confirmEl.hidden = false;
+    try{ confirmOk.focus(); }catch(e){}
+  }
+  function closeConfirm(){
+    confirmEl.hidden = true;
+    confirmAction = null;
+  }
+  /* 取消：关掉弹层，并把刚才暂停的 AI 行棋接上 */
+  function cancelConfirm(){
+    closeConfirm();
+    if (getMode() === "pvp" || isReplaying()) return;
+    var g = getGame();
+    if (g && !g.result) scheduleAI();
+  }
+  confirmOk.addEventListener("click", function(){
+    var fn = confirmAction;
+    closeConfirm();
+    if (fn) fn();
+  });
+  confirmCancel.addEventListener("click", cancelConfirm);
+  confirmEl.addEventListener("click", function(e){
+    if (e.target.hasAttribute && e.target.hasAttribute("data-cancel")) cancelConfirm();
+  });
+
+  document.getElementById("btnNew").addEventListener("click", requestNewGame);
+  document.getElementById("qbNew").addEventListener("click", requestNewGame);
   document.getElementById("vBtn").addEventListener("click", freshGame);
 
   /* 结束界面：按住「查看棋局」暂时隐藏，松开恢复；「关闭」彻底收起。
@@ -214,7 +268,7 @@ function start(){
     ui.render();
   });
 
-  document.getElementById("btnUndo").addEventListener("click", function(){
+  function doUndo(){
     if (isReplaying() || !getUndoStack().length) return;
     stopAI();
     /* AI 对弈：悔棋时一并暂停自动行棋，方便逐步复盘；点「自动」继续 */
@@ -224,7 +278,9 @@ function start(){
     if (getMode() === "ai" && getGame().turn === (getAiFirst() ? 1 : 0)) n = 2;
     undo(n);                       /* 悔棋栈保留，可以一直悔下去 */
     syncPace();
-  });
+  }
+  document.getElementById("btnUndo").addEventListener("click", doUndo);
+  document.getElementById("qbUndo").addEventListener("click", doUndo);
 
   /* 当前对局打包成 Demo：起始快照 + 走子序列，保存和复制共用。
      回放中或还没走过子时没有可导出的对局，返回 null。 */
@@ -252,7 +308,7 @@ function start(){
     setTimeout(function(){ btnSaveDemo.textContent = "保存 Demo"; }, 1200);
   });
 
-  /* 只复制，不写 localStorage */
+  /* 只复制，不写 localStorage；保存与复制共用 currentDemo() */
   var btnCopyDemo = document.getElementById("btnCopyDemo");
   btnCopyDemo.addEventListener("click", function(){
     var demo = currentDemo();
@@ -265,12 +321,69 @@ function start(){
     copyText(txt).then(function(){ done(true); }, function(){ done(legacyCopy(txt)); });
   });
 
-  /* Demo 列表：▶ 回放 / 复制 / 删 删除 */
+  /* 结束界面的「复盘本局」：把本局当作一段 Demo 从头逐手回看，停在开局。
+     关闭结束界面后再进回放，棋局由只读变为可控的回放视图。 */
+  document.getElementById("vReplay").addEventListener("click", function(){
+    var acts = getActions(), start0 = getBaseSnapshot();
+    if (!acts.length || !start0) return;
+    stopAI();
+    stopReplayTimer();
+    ui.dismissVictory();
+    if (isReplaying()) endReplay();
+    replayFromVictory = true;
+    replayDemo = { start: start0, actions: acts.slice() };
+    if (!beginReplay(start0, acts.slice())){
+      replayFromVictory = false;
+      replayDemo = null;
+      ui.clearVictoryDismissed();
+      updateReplayButtons();
+      ui.render();
+      return;
+    }
+    document.getElementById("replayMode").value = getMode();
+    /* 不自动播放：先停在空盘，让用户自己按「播放」或「单步」 */
+    updateReplayButtons();
+  });
+
+  /* 结束界面的「复制 Demo」：与侧栏「复制当前 Demo」同源同格式 */
+  var vCopyDemo = document.getElementById("vCopyDemo");
+  vCopyDemo.addEventListener("click", function(){
+    var demo = currentDemo();
+    if (!demo) return;
+    var txt = JSON.stringify(demo);
+    var done = function(ok){
+      vCopyDemo.textContent = ok ? "已复制 ✓" : "复制失败";
+      setTimeout(function(){ vCopyDemo.textContent = "复制 Demo"; }, 1400);
+    };
+    copyText(txt).then(function(){ done(true); }, function(){ done(legacyCopy(txt)); });
+  });
+
+  /* Demo 列表：▶ 回放 / 复制 / 删 删除。
+     删除不可撤销：第一次点击只进入确认态，2.6 秒内再点一次才真正删除。
+     确认态由 ui 渲染，中途重绘也不会丢掉。 */
+  var delTimer = null;
+  function clearDelConfirm(){
+    if (delTimer){ clearTimeout(delTimer); delTimer = null; }
+    ui.setDemoDelConfirm(null);
+  }
   document.getElementById("demoList").addEventListener("click", function(e){
     var t = e.target.closest ? e.target.closest("[data-play],[data-copy],[data-del]") : null;
     if (!t) return;
     if (t.hasAttribute("data-del")){
-      removeDemo(t.getAttribute("data-del"));
+      var delId = t.getAttribute("data-del");
+      if (t.getAttribute("data-confirm") !== "1"){
+        clearDelConfirm();
+        ui.setDemoDelConfirm(delId);
+        ui.renderDemos();
+        delTimer = setTimeout(function(){
+          delTimer = null;
+          ui.setDemoDelConfirm(null);
+          ui.renderDemos();
+        }, 2600);
+        return;
+      }
+      clearDelConfirm();
+      removeDemo(delId);
       ui.renderDemos();
       return;
     }
@@ -355,6 +468,7 @@ function start(){
     /* 人机模式：人接手当前行棋的一方，AI 执另一方 */
     if (m === "ai") setAiFirst(turn === 1);
     setAiPaused(false);             /* 从回放接续时恢复自动行棋 */
+    replayFromVictory = false;
     replayDemo = null;
     if (!adoptReplay()) return;
     syncModeButtons();
@@ -381,9 +495,15 @@ function start(){
   });
 
   var modal = document.getElementById("modal");
-  document.getElementById("btnRules").addEventListener("click", function(){ modal.hidden = false; });
+  function openRules(){ modal.hidden = false; }
+  document.getElementById("btnRules").addEventListener("click", openRules);
+  document.getElementById("qbRules").addEventListener("click", openRules);
   modal.addEventListener("click", function(e){ if (e.target.hasAttribute("data-close")) modal.hidden = true; });
-  document.addEventListener("keydown", function(e){ if (e.key === "Escape") modal.hidden = true; });
+  document.addEventListener("keydown", function(e){
+    if (e.key !== "Escape") return;
+    if (!confirmEl.hidden) cancelConfirm();
+    else modal.hidden = true;
+  });
 
   document.getElementById("mPvp").addEventListener("click", function(){ setMode("pvp"); });
   document.getElementById("mAi").addEventListener("click", function(){ setMode("ai"); });
