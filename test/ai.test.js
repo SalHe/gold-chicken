@@ -20,6 +20,32 @@ describe("终局意识", () => {
     expect(ai.terminalScore(draw, 0)).toBe(0);
   });
 
+  it("长捉判负与堵岸改判也进入终局分", () => {
+    const chase = mk(
+      [[xy2i(1, 1), 2], [xy2i(4, 7), 10]],
+      [[xy2i(1, 2), 5], [xy2i(4, 6), 9]],
+      { chase: { by: "r", chaserUid: 1, targetUid: 3, rounds: 11, pending: false } }
+    );
+    expect(ai.terminalScore(chase, 0)).toBeLessThan(-1e6);   /* 红方是长捉方 */
+    expect(ai.terminalScore(chase, 1)).toBeGreaterThan(1e6);
+
+    const bl = mk(
+      [[xy2i(1, 4), 9], [xy2i(4, 4), 7], [xy2i(1, 1), 8]],
+      [[xy2i(4, 7), 4], [xy2i(4, 6), 5]],
+      { noCap: 60 }
+    );
+    expect(ai.terminalScore(bl, 0)).toBeLessThan(-1e6);      /* 红方堵岸且较弱 */
+    expect(ai.terminalScore(bl, 1)).toBeGreaterThan(1e6);
+
+    /* 有暗棋时不按公开信息判定堵岸子力，仍按和棋计 */
+    const hid = mk(
+      [[xy2i(1, 4), 9], [xy2i(4, 4), 7], [xy2i(1, 1), 8]],
+      [[xy2i(4, 7), 4], [xy2i(4, 6), 5], [xy2i(3, 7), RAT, false]],
+      { noCap: 60 }
+    );
+    expect(ai.terminalScore(hid, 0)).toBe(0);
+  });
+
   it("优先选择能立刻结束对局的一手", () => {
     /* 红方走完这手，黑方只剩一只鼠且无路可走（或直接被吃光） */
     const A = xy2i(1, 2), B = xy2i(2, 2), C = xy2i(1, 1);

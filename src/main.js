@@ -14,20 +14,20 @@ let aiTimer = null;
 let replayTimer = null;
 
 /* ---------- 偏好设置：速度 / 主题 / 棋子样式 / 音效 / 震动 ---------- */
-var PREF = {
+const PREF = {
   speed: "gold-chicken.speed.v1",
   theme: "gold-chicken.theme.v1",
   face: "gold-chicken.face.v1",
   sound: "gold-chicken.sound.v1",
   vibe: "gold-chicken.vibe.v1"
 };
-var speed = "mid", theme = "auto", face = "text", soundOn = false, vibeOn = false;
-var SPEED_DELAY = { slow: [920, 320], mid: [480, 260], fast: [150, 120] };
-var REPLAY_MS = { slow: 1100, mid: 620, fast: 280 };
+let speed = "mid", theme = "auto", face = "text", soundOn = false, vibeOn = false;
+const SPEED_DELAY = { slow: [920, 320], mid: [480, 260], fast: [150, 120] };
+const REPLAY_MS = { slow: 1100, mid: 620, fast: 280 };
 
 function readPref(key, valid, dflt){
   try{
-    var v = typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
+    const v = typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
     if (v == null) return dflt;
     if (valid && valid.indexOf(v) < 0) return dflt;
     return v;
@@ -38,8 +38,8 @@ function writePref(key, v){
 }
 
 function syncSpeed(){
-  var ids = { slow: "spSlow", mid: "spMid", fast: "spFast" };
-  for (var k in ids){
+  const ids = { slow: "spSlow", mid: "spMid", fast: "spFast" };
+  for (const k in ids){
     if (Object.prototype.hasOwnProperty.call(ids, k)){
       document.getElementById(ids[k]).setAttribute("aria-pressed", speed === k ? "true" : "false");
     }
@@ -53,8 +53,8 @@ function setSpeed(v){
   if (replayTimer) startReplayTimer();   /* 回放中改速度立即生效 */
 }
 function syncTheme(){
-  var ids = { auto: "thAuto", light: "thLight", dark: "thDark" };
-  for (var k in ids){
+  const ids = { auto: "thAuto", light: "thLight", dark: "thDark" };
+  for (const k in ids){
     if (Object.prototype.hasOwnProperty.call(ids, k)){
       document.getElementById(ids[k]).setAttribute("aria-pressed", theme === k ? "true" : "false");
     }
@@ -62,7 +62,7 @@ function syncTheme(){
 }
 function applyTheme(){
   try{
-    var root = document.documentElement;
+    const root = document.documentElement;
     if (!root) return;
     if (theme === "auto"){
       if (root.removeAttribute) root.removeAttribute("data-theme");
@@ -92,7 +92,7 @@ function setFace(v){
   syncFace();
 }
 function syncSwitches(){
-  var s = document.getElementById("swSound"), v = document.getElementById("swVibe");
+  const s = document.getElementById("swSound"), v = document.getElementById("swVibe");
   s.setAttribute("aria-checked", soundOn ? "true" : "false");
   s.textContent = soundOn ? "开" : "关";
   s.classList.toggle("on", soundOn);
@@ -102,8 +102,8 @@ function syncSwitches(){
 }
 
 /* ---------- 音效 / 震动：默认关闭，由设置里的开关打开 ---------- */
-var actx = null;
-var SOUND = {
+let actx = null;
+const SOUND = {
   flip: [520, .06, "triangle", .04],
   move: [300, .05, "sine", .035],
   press: [190, .09, "square", .04],
@@ -114,18 +114,18 @@ var SOUND = {
   win: [660, .25, "triangle", .05],
   draw: [330, .2, "sine", .045]
 };
-var VIBE = {
+const VIBE = {
   flip: 12, move: 8, press: 16, capture: 24, trade: 20,
   thirst: 30, dive: [30, 50, 30], win: [25, 60, 25], draw: 28
 };
 function tone(freq, dur, type, gain){
   try{
-    var AC = window.AudioContext || window.webkitAudioContext;
+    const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     if (!actx) actx = new AC();
     if (actx.state === "suspended" && actx.resume) actx.resume();
-    var t0 = actx.currentTime;
-    var o = actx.createOscillator(), g = actx.createGain();
+    const t0 = actx.currentTime;
+    const o = actx.createOscillator(), g = actx.createGain();
     o.type = type || "sine";
     o.frequency.setValueAtTime(freq, t0);
     g.gain.setValueAtTime(Math.max(0.0001, gain || 0.04), t0);
@@ -135,7 +135,7 @@ function tone(freq, dur, type, gain){
   }catch(e){}
 }
 function feedback(kind){
-  var s = SOUND[kind];
+  const s = SOUND[kind];
   if (soundOn && s) tone(s[0], s[1], s[2], s[3]);
   if (vibeOn && VIBE[kind] && typeof navigator !== "undefined" && navigator.vibrate){
     try{ navigator.vibrate(VIBE[kind]); }catch(e){}
@@ -157,17 +157,17 @@ function setVibe(on){
 }
 
 /* ---------- 走子播报 ---------- */
-var popTimer = null;
+let popTimer = null;
 function hideMovePop(){
   if (popTimer){ clearTimeout(popTimer); popTimer = null; }
-  var pop = document.getElementById("movePop");
+  const pop = document.getElementById("movePop");
   if (pop){ pop.classList.remove("show"); pop.textContent = ""; }
 }
 function announce(turnBefore){
-  var pop = document.getElementById("movePop");
-  var note = getLastNote();
+  const pop = document.getElementById("movePop");
+  const note = getLastNote();
   if (!pop || !note) return;
-  var who = getMode() === "aiai" ? (turnBefore === 0 ? "电脑A" : "电脑B") : "电脑";
+  const who = getMode() === "aiai" ? (turnBefore === 0 ? "电脑A" : "电脑B") : "电脑";
   pop.textContent = who + "：" + note;
   pop.classList.add("show");
   if (popTimer) clearTimeout(popTimer);
@@ -191,7 +191,7 @@ function copyText(text){
   return Promise.reject(new Error("clipboard unavailable"));
 }
 function legacyCopy(text){
-  var ta = document.createElement("textarea");
+  const ta = document.createElement("textarea");
   ta.value = text;
   ta.setAttribute("readonly", "");
   ta.style.position = "fixed";
@@ -199,7 +199,7 @@ function legacyCopy(text){
   ta.style.opacity = "0";
   document.body.appendChild(ta);
   ta.select();
-  var ok = false;
+  let ok = false;
   try{ ok = !!(document.execCommand && document.execCommand("copy")); }catch(e){}
   document.body.removeChild(ta);
   return ok;
@@ -213,9 +213,9 @@ function scheduleAI(){
   aiTimer = setTimeout(function(){
     aiTimer = null;
     if (isReplaying() || !isAITurn() || getAiPaused()) return;
-    var g = getGame();
-    var turnBefore = g.turn;
-    var a = aiPick(g, g.turn, { history: getPositionHistory() });
+    const g = getGame();
+    const turnBefore = g.turn;
+    const a = aiPick(g, g.turn, { history: getPositionHistory() });
     if (a){ commit(a); announce(turnBefore); }
   }, SPEED_DELAY[speed][0] + Math.random() * SPEED_DELAY[speed][1]);
 }
@@ -226,10 +226,10 @@ function stepAI(){
   stopAI();
   setAiPaused(true);
   if (isReplaying() || getMode() !== "aiai") return;
-  var g = getGame();
+  const g = getGame();
   if (!g || g.result) return;
-  var turnBefore = g.turn;
-  var a = aiPick(g, g.turn, { history: getPositionHistory() });
+  const turnBefore = g.turn;
+  const a = aiPick(g, g.turn, { history: getPositionHistory() });
   if (a){ commit(a); announce(turnBefore); } else syncPace();
 }
 function applyPace(paused){
@@ -239,9 +239,9 @@ function applyPace(paused){
   if (!paused && !isReplaying() && getMode() === "aiai" && !getGame().result) scheduleAI();
 }
 function syncPace(){
-  var aiai = getMode() === "aiai";
-  var paused = getAiPaused();
-  var over = !getGame() || !!getGame().result || isReplaying();
+  const aiai = getMode() === "aiai";
+  const paused = getAiPaused();
+  const over = !getGame() || !!getGame().result || isReplaying();
   document.getElementById("paceSeg").hidden = !aiai;
   document.getElementById("bAuto").setAttribute("aria-pressed", paused ? "false" : "true");
   document.getElementById("bStep").setAttribute("aria-pressed", paused ? "true" : "false");
@@ -254,15 +254,15 @@ function stopReplayTimer(){
   if (replayTimer){ clearInterval(replayTimer); replayTimer = null; }
 }
 function updateReplayButtons(){
-  var on = isReplaying();
-  var info = getReplayInfo();
-  var idx = info ? info.idx : 0, total = info ? info.total : 0;
+  const on = isReplaying();
+  const info = getReplayInfo();
+  const idx = info ? info.idx : 0, total = info ? info.total : 0;
   document.getElementById("btnReplayPlay").textContent = replayTimer ? "暂停" : "播放";
   document.getElementById("btnReplayPlay").disabled = !on;
   document.getElementById("btnReplayStep").disabled = !on || idx >= total;
   document.getElementById("btnReplayBack").disabled = !on || idx <= 0;
   document.getElementById("btnReplayStop").disabled = !on;
-  var over = !on || !!getGame().result;
+  const over = !on || !!getGame().result;
   document.getElementById("btnReplayResume").disabled = over;
   document.getElementById("replayMode").disabled = over;
 }
@@ -310,7 +310,7 @@ function exitReplay(){
 }
 
 function syncModeButtons(){
-  var m = getMode();
+  const m = getMode();
   document.getElementById("mPvp").setAttribute("aria-pressed", m === "pvp" ? "true" : "false");
   document.getElementById("mAi").setAttribute("aria-pressed", m === "ai" ? "true" : "false");
   document.getElementById("mAiAi").setAttribute("aria-pressed", m === "aiai" ? "true" : "false");
@@ -366,7 +366,7 @@ function start(){
 
   /* 重新开局会清空当前对局，有走子又未终局时先问一句 */
   function requestNewGame(){
-    var g = getGame();
+    const g = getGame();
     if (isReplaying() || !g || g.result || !getActions().length){ freshGame(); return; }
     askConfirm("重新开局？",
       "当前对局尚未结束。重新开局会清空本局进度和悔棋记录（已保存的 Demo 不受影响）。",
@@ -374,10 +374,10 @@ function start(){
   }
 
   /* ---------- 二次确认弹层 ---------- */
-  var confirmEl = document.getElementById("confirm");
-  var confirmOk = document.getElementById("confirmOk");
-  var confirmCancel = document.getElementById("confirmCancel");
-  var confirmAction = null;
+  const confirmEl = document.getElementById("confirm");
+  const confirmOk = document.getElementById("confirmOk");
+  const confirmCancel = document.getElementById("confirmCancel");
+  let confirmAction = null;
   function askConfirm(title, msg, okText, fn){
     /* 弹层期间暂停 AI，避免它在用户犹豫时继续落子；取消后再恢复 */
     stopAI();
@@ -396,11 +396,11 @@ function start(){
   function cancelConfirm(){
     closeConfirm();
     if (getMode() === "pvp" || isReplaying()) return;
-    var g = getGame();
+    const g = getGame();
     if (g && !g.result) scheduleAI();
   }
   confirmOk.addEventListener("click", function(){
-    var fn = confirmAction;
+    const fn = confirmAction;
     closeConfirm();
     if (fn) fn();
   });
@@ -415,8 +415,8 @@ function start(){
 
   /* 结束界面：按住「查看棋局」暂时隐藏，松开恢复；「关闭」彻底收起。
      关闭后 onCell 仍因 result 直接返回，棋局保持只读。 */
-  var vPeek = document.getElementById("vPeek");
-  var peeking = false;
+  const vPeek = document.getElementById("vPeek");
+  let peeking = false;
   function startPeek(e){
     if (e && e.pointerType === "mouse" && e.button !== 0) return;
     if (e && e.preventDefault) e.preventDefault();
@@ -456,7 +456,7 @@ function start(){
     /* AI 对弈：悔棋时一并暂停自动行棋，方便逐步复盘；点「自动」继续 */
     if (getMode() === "aiai") setAiPaused(true);
     /* 人机模式：一次悔棋退回到自己行棋前的一手（连电脑那一手一起退） */
-    var n = 1;
+    let n = 1;
     if (getMode() === "ai" && getGame().turn === (getAiFirst() ? 1 : 0)) n = 2;
     undo(n);                       /* 悔棋栈保留，可以一直悔下去 */
     syncPace();
@@ -479,9 +479,9 @@ function start(){
      回放中或还没走过子时没有可导出的对局，返回 null。 */
   function currentDemo(){
     if (isReplaying()) return null;
-    var acts = getActions(), start0 = getBaseSnapshot();
+    const acts = getActions(), start0 = getBaseSnapshot();
     if (!acts.length || !start0) return null;
-    var g = getGame();
+    const g = getGame();
     return {
       id: newDemoId(),
       at: Date.now(),
@@ -491,23 +491,23 @@ function start(){
     };
   }
 
-  var btnSaveDemo = document.getElementById("btnSaveDemo");
+  const btnSaveDemo = document.getElementById("btnSaveDemo");
   btnSaveDemo.addEventListener("click", function(){
-    var demo = currentDemo();
+    const demo = currentDemo();
     if (!demo) return;
-    var ok = saveDemo(demo);
+    const ok = saveDemo(demo);
     ui.renderDemos();
     btnSaveDemo.textContent = ok ? "已保存 ✓" : "保存失败";
     setTimeout(function(){ btnSaveDemo.textContent = "保存 Demo"; }, 1200);
   });
 
   /* 只复制，不写 localStorage；保存与复制共用 currentDemo() */
-  var btnCopyDemo = document.getElementById("btnCopyDemo");
+  const btnCopyDemo = document.getElementById("btnCopyDemo");
   btnCopyDemo.addEventListener("click", function(){
-    var demo = currentDemo();
+    const demo = currentDemo();
     if (!demo) return;
-    var txt = JSON.stringify(demo);
-    var done = function(ok){
+    const txt = JSON.stringify(demo);
+    const done = function(ok){
       btnCopyDemo.textContent = ok ? "已复制 ✓" : "复制失败";
       setTimeout(function(){ btnCopyDemo.textContent = "复制当前 Demo"; }, 1200);
     };
@@ -517,7 +517,7 @@ function start(){
   /* 结束界面的「复盘本局」：把本局当作一段 Demo 从头逐手回看，停在开局。
      关闭结束界面后再进回放，棋局由只读变为可控的回放视图。 */
   document.getElementById("vReplay").addEventListener("click", function(){
-    var acts = getActions(), start0 = getBaseSnapshot();
+    const acts = getActions(), start0 = getBaseSnapshot();
     if (!acts.length || !start0) return;
     stopAI();
     stopReplayTimer();
@@ -539,12 +539,12 @@ function start(){
   });
 
   /* 结束界面的「复制 Demo」：与侧栏「复制当前 Demo」同源同格式 */
-  var vCopyDemo = document.getElementById("vCopyDemo");
+  const vCopyDemo = document.getElementById("vCopyDemo");
   vCopyDemo.addEventListener("click", function(){
-    var demo = currentDemo();
+    const demo = currentDemo();
     if (!demo) return;
-    var txt = JSON.stringify(demo);
-    var done = function(ok){
+    const txt = JSON.stringify(demo);
+    const done = function(ok){
       vCopyDemo.textContent = ok ? "已复制 ✓" : "复制失败";
       setTimeout(function(){ vCopyDemo.textContent = "复制 Demo"; }, 1400);
     };
@@ -554,16 +554,16 @@ function start(){
   /* Demo 列表：▶ 回放 / 复制 / 删 删除。
      删除不可撤销：第一次点击只进入确认态，2.6 秒内再点一次才真正删除。
      确认态由 ui 渲染，中途重绘也不会丢掉。 */
-  var delTimer = null;
+  let delTimer = null;
   function clearDelConfirm(){
     if (delTimer){ clearTimeout(delTimer); delTimer = null; }
     ui.setDemoDelConfirm(null);
   }
   document.getElementById("demoList").addEventListener("click", function(e){
-    var t = e.target.closest ? e.target.closest("[data-play],[data-copy],[data-del]") : null;
+    const t = e.target.closest ? e.target.closest("[data-play],[data-copy],[data-del]") : null;
     if (!t) return;
     if (t.hasAttribute("data-del")){
-      var delId = t.getAttribute("data-del");
+      const delId = t.getAttribute("data-del");
       if (t.getAttribute("data-confirm") !== "1"){
         clearDelConfirm();
         ui.setDemoDelConfirm(delId);
@@ -581,25 +581,25 @@ function start(){
       return;
     }
     if (t.hasAttribute("data-copy")){
-      var dc = getDemo(t.getAttribute("data-copy"));
+      const dc = getDemo(t.getAttribute("data-copy"));
       if (!dc) return;
-      var label = t, txt = JSON.stringify(dc);
-      var show = function(ok){
+      const label = t, txt = JSON.stringify(dc);
+      const show = function(ok){
         label.textContent = ok ? "✓" : "失败";
         setTimeout(function(){ label.textContent = "复制"; }, 1200);
       };
       copyText(txt).then(function(){ show(true); }, function(){ show(legacyCopy(txt)); });
       return;
     }
-    var d = getDemo(t.getAttribute("data-play"));
+    const d = getDemo(t.getAttribute("data-play"));
     if (d) playDemo(d);
   });
 
   /* Demo 导入：先直接读剪贴板；读不到（无权限 / 浏览器不支持）就展开粘贴框 */
-  var importBtn = document.getElementById("btnDemoImport");
-  var importBox = document.getElementById("demoImportBox");
-  var importText = document.getElementById("demoImportText");
-  var importTimer = null;
+  const importBtn = document.getElementById("btnDemoImport");
+  const importBox = document.getElementById("demoImportBox");
+  const importText = document.getElementById("demoImportText");
+  let importTimer = null;
   function importFeedback(msg){
     importBtn.textContent = msg;
     if (importTimer) clearTimeout(importTimer);
@@ -611,8 +611,8 @@ function start(){
   }
   function hideImportBox(){ importBox.hidden = true; }
   function doImport(text){
-    var parsed = parseDemos(text);
-    var added = importDemos(text);
+    const parsed = parseDemos(text);
+    const added = importDemos(text);
     ui.renderDemos();
     if (!parsed.length){ importFeedback("不是有效的 Demo"); return; }
     hideImportBox();
@@ -620,7 +620,7 @@ function start(){
     importFeedback(added ? "已导入 " + added + " 局 ✓" : "已在列表里，或本地存储不可用");
   }
   importBtn.addEventListener("click", function(){
-    var p;
+    let p;
     try{
       p = (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.readText)
         ? navigator.clipboard.readText()
@@ -638,7 +638,7 @@ function start(){
 
   document.getElementById("btnReplayStop").addEventListener("click", exitReplay);
   document.getElementById("btnReplayBack").addEventListener("click", function(){
-    var info = getReplayInfo();
+    const info = getReplayInfo();
     if (!isReplaying() || !info || info.idx <= 0) return;
     seekReplay(info.idx - 1);
   });
@@ -651,18 +651,18 @@ function start(){
   /* 回放中点击行棋记录：跳到那一手之后的局面 */
   document.getElementById("log").addEventListener("click", function(e){
     if (!isReplaying()) return;
-    var t = e.target.closest ? e.target.closest("[data-step]") : null;
+    const t = e.target.closest ? e.target.closest("[data-step]") : null;
     if (!t) return;
-    var n = parseInt(t.getAttribute("data-step"), 10);
+    const n = parseInt(t.getAttribute("data-step"), 10);
     if (!isFinite(n)) return;
     seekReplay(n);
   });
   document.getElementById("btnReplayResume").addEventListener("click", function(){
     if (!isReplaying() || getGame().result) return;
     stopReplayTimer();
-    var m = document.getElementById("replayMode").value;
+    let m = document.getElementById("replayMode").value;
     if (m !== "pvp" && m !== "ai" && m !== "aiai") m = "pvp";
-    var turn = getGame().turn;
+    const turn = getGame().turn;
     setStateMode(m);
     /* 人机模式：人接手当前行棋的一方，AI 执另一方 */
     if (m === "ai") setAiFirst(turn === 1);
@@ -682,9 +682,9 @@ function start(){
   document.getElementById("btnReplayPlay").addEventListener("click", function(){
     if (!isReplaying()) return;
     if (replayTimer){ stopReplayTimer(); updateReplayButtons(); return; }
-    var info = getReplayInfo();
+    const info = getReplayInfo();
     if (info && info.idx >= info.total && replayDemo){
-      var d = replayDemo;
+      const d = replayDemo;
       endReplay();
       if (beginReplay(d.start, d.actions)) startReplayTimer();
       else { replayDemo = null; updateReplayButtons(); }
@@ -693,7 +693,7 @@ function start(){
     startReplayTimer();
   });
 
-  var modal = document.getElementById("modal");
+  const modal = document.getElementById("modal");
   function openRules(){ modal.hidden = false; }
   document.getElementById("btnRules").addEventListener("click", openRules);
   document.getElementById("qbRules").addEventListener("click", openRules);

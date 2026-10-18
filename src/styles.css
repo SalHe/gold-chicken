@@ -595,6 +595,8 @@ button.act:disabled{opacity:.45; cursor:not-allowed}
   font-size:12.5px; color:var(--muted); text-align:center; max-width:330px; min-height:19px;
   transition:opacity .18s;
 }
+/* 新规则预警（长捉 / 和棋倒计时 / 堵岸改判）：用警示色，但仍留在棋盘下方 */
+.hint.warn{color:var(--danger); font-weight:600}
 /* 窄屏快捷操作条：面板在棋盘下方，常见的悔棋/重开/规则放到棋盘边上 */
 .quickbar{display:none}
 @media (max-width:820px){

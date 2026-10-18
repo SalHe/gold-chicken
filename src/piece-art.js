@@ -16,7 +16,7 @@ import cat from "./art/10-cat.webp";
 import mouse from "./art/11-mouse.webp";
 import rooster from "./art/12-rooster.webp";
 
-var ART = [dragon, qilin, lion, elephant, tiger, leopard, wolf, dog, fox, cat, mouse, rooster];
+const ART = [dragon, qilin, lion, elephant, tiger, leopard, wolf, dog, fox, cat, mouse, rooster];
 
 /* t 为棋子阶数（1 龙 … 12 金鸡）；越界返回空串，不画图案。 */
 export function pieceArtSrc(t){

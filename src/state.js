@@ -1,8 +1,9 @@
 /* 活棋状态 + 回合流转 + 访问器。不碰 DOM；靠 change hook 通知渲染层。 */
-import { N, NAME } from "./constants.js";
+import { N } from "./constants.js";
 import {
   xy, isRiver, isBank, shuffle, posName, pname,
-  counts, deadPosition, allActions, applyMove, positionKey
+  counts, deadPosition, allActions, applyMove, positionKey,
+  updateChase, chaseLoss, blockadeDrawLoser
 } from "./rules.js";
 
 let game = null;
@@ -62,18 +63,19 @@ export function setFeedback(fn){ feedback = fn; }
 export function getLastNote(){ return lastNote; }
 
 export function newGame(){
-  var pieces = [], c, t;
-  for (var k = 0; k < 2; k++){
+  const pieces = [];
+  let c, t;
+  for (let k = 0; k < 2; k++){
     c = k === 0 ? "r" : "b";
     for (t = 1; t <= 12; t++) pieces.push({ uid: ++uidSeq, t: t, c: c, rv: false });
   }
   shuffle(pieces);
   /* 布子池：河界与两岸都留空，只剩 24 个陆地格，刚好铺满 */
-  var cells = [];
-  for (var i = 0; i < N; i++) if (!isRiver(i) && !isBank(i)) cells.push(i);
+  const cells = [];
+  for (let i = 0; i < N; i++) if (!isRiver(i) && !isBank(i)) cells.push(i);
   shuffle(cells);
-  var board = new Array(N).fill(null);
-  for (var m = 0; m < pieces.length && m < cells.length; m++) board[cells[m]] = pieces[m];
+  const board = new Array(N).fill(null);
+  for (let m = 0; m < pieces.length && m < cells.length; m++) board[cells[m]] = pieces[m];
 
   game = {
     board: board,
@@ -85,7 +87,8 @@ export function newGame(){
     last: null,
     caps: { r: [], b: [] },
     log: [],
-    pulse: null
+    pulse: null,
+    chase: null
   };
   sel = -1; curMoves = []; armed = -1; undoStack = []; actions = [];
   aiPaused = false;                 /* 新开局总是回到自动行棋 */
@@ -101,7 +104,7 @@ export function snapshot(){
 /* keepStack=true 供悔棋使用：退回到旧局面，但保留剩余的悔棋栈与走子序列 */
 export function restore(json, keepStack){
   try{
-    var o = JSON.parse(json);
+    const o = JSON.parse(json);
     if (!o || !o.g || !o.g.board) return false;
     game = o.g; uidSeq = o.uid || uidSeq;
     sel = -1; curMoves = []; armed = -1;
@@ -116,9 +119,10 @@ export function restore(json, keepStack){
 }
 
 export function doFlip(i, pi){
-  var p = game.board[i];
+  const p = game.board[i];
   p.rv = true;
-  var assigned = false;
+  game.chase = null;                 /* 新棋子入场会改变威胁关系，长捉重新计数 */
+  let assigned = false;
   if (!game.firstFlip){
     game.firstFlip = true;
     game.pcolor[0] = p.c;
@@ -138,13 +142,14 @@ export function doFlip(i, pi){
   return false;
 }
 export function doMove(a, pi){
-  var p = game.board[a.from];
-  var q = game.board[a.to];
-  var col = p.c === "r" ? "红" : "黑";
-  var line = col + "方 " + pname(p) + " " + posName(a.from) + "→" + posName(a.to);
-  var note = pname(p) + " " + posName(a.from) + "→" + posName(a.to);
-  var ate = false;
-  var traded = !!(q && q.t === p.t && a.kind !== "press");
+  const p = game.board[a.from];
+  const q = game.board[a.to];
+  const col = p.c === "r" ? "红" : "黑";
+  let line = col + "方 " + pname(p) + " " + posName(a.from) + "→" + posName(a.to);
+  let note = pname(p) + " " + posName(a.from) + "→" + posName(a.to);
+  let ate = false;
+  const traded = !!(q && q.t === p.t && a.kind !== "press");
+  const movedUid = p.uid, moverColor = p.c;
 
   if (q){
     if (a.kind === "press"){
@@ -153,7 +158,7 @@ export function doMove(a, pi){
       note += " 压 " + pname(q);
     } else {
       ate = true;
-      var whose = q.c === p.c ? "己方 " : (q.c === "r" ? "红方 " : "黑方 ");
+      const whose = q.c === p.c ? "己方 " : (q.c === "r" ? "红方 " : "黑方 ");
       line += traded
         ? "，与 " + whose + pname(q) + " <span class='k'>邀兑同归于尽</span>"
         : "，吃掉 " + whose + pname(q);
@@ -161,7 +166,8 @@ export function doMove(a, pi){
       if (traded) note = pname(p) + " " + posName(a.from) + "→" + posName(a.to) + " 与 " + pname(q) + " 邀兑";
     }
   }
-  var ev = applyMove(game, a);
+  const ev = applyMove(game, a);
+  updateChase(game, movedUid, moverColor);
 
   if (a.kind === "thirst"){
     ate = true;
@@ -169,9 +175,9 @@ export function doMove(a, pi){
     note += " · 上岸渴死";
     game.pulse = a.to;
   } else if (a.kind === "dive"){
-    var names = [];
-    for (var k = 0; k < ev[ev.length - 1].lost.length; k++){
-      var L = ev[ev.length - 1].lost[k];
+    const names = [];
+    for (let k = 0; k < ev[ev.length - 1].lost.length; k++){
+      const L = ev[ev.length - 1].lost[k];
       names.push((L.p.c === "r" ? "红" : "黑") + pname(L.p));
     }
     line = col + "方 " + pname(p) + " " + posName(a.from) + "→" + posName(a.to) +
@@ -190,16 +196,43 @@ export function doMove(a, pi){
   return ate;
 }
 
+/* 和棋判定：若此时仍在堵岸、且堵岸方子力较弱，改判堵岸方负 */
+function drawResult(reason){
+  const loser = blockadeDrawLoser(game);
+  if (loser){
+    const l = loser === "r" ? "红方" : "黑方";
+    game.result = {
+      kind: "win",
+      winner: loser === "r" ? "b" : "r",
+      why: l + "堵岸且子力较弱，和棋改判" + l + "负",
+      blockadeLoss: true
+    };
+    return game.result;
+  }
+  game.result = { kind: "draw", why: reason };
+  return game.result;
+}
 export function checkResult(){
-  var c = counts(game);
+  const c = counts(game);
   if (c.r === 0 && c.b === 0) return (game.result = { kind: "draw", why: "双方同归于尽" });
   if (c.r === 0) return (game.result = { kind: "win", winner: "b" });
   if (c.b === 0) return (game.result = { kind: "win", winner: "r" });
-  if (game.noCap >= 60) return (game.result = { kind: "draw", why: "连续 60 手无吃子" });
-  if (deadPosition(game)) return (game.result = { kind: "draw", why: "双方已无法互吃，死局" });
+  const chaser = chaseLoss(game);
+  if (chaser){
+    const cl = chaser === "r" ? "红方" : "黑方";
+    game.result = {
+      kind: "win",
+      winner: chaser === "r" ? "b" : "r",
+      why: cl + "长捉同一子超过 10 回合，判负",
+      longChase: true
+    };
+    return game.result;
+  }
+  if (game.noCap >= 60) return drawResult("连续 60 手无吃子");
+  if (deadPosition(game)) return drawResult("双方已无法互吃，死局");
   if (allActions(game, game.turn).length === 0){
-    var loser = game.pcolor[game.turn];
-    var winner = loser === "r" ? "b" : (loser === "b" ? "r" : (game.turn === 0 ? "b" : "r"));
+    const loser = game.pcolor[game.turn];
+    const winner = loser === "r" ? "b" : (loser === "b" ? "r" : (game.turn === 0 ? "b" : "r"));
     game.result = { kind: "win", winner: winner, stalemate: true };
     return game.result;
   }
@@ -219,7 +252,7 @@ export function commit(a){
   if (a.kind === "flip") doFlip(a.i, game.turn);
   else doMove(a, game.turn);
   /* 本手序号：非枚举属性，不进快照；行棋记录用它编号 */
-  var top = game.log[game.log.length - 1];
+  const top = game.log[game.log.length - 1];
   if (top){
     Object.defineProperty(top, "no", { value: actions.length, enumerable: false, configurable: true });
   }
@@ -228,9 +261,9 @@ export function commit(a){
 }
 /* 悔棋 n 手：悔棋栈与走子序列同步回退，栈本身保留，因此可以一直悔下去 */
 export function undo(n){
-  var count = n || 1;
+  const count = n || 1;
   if (!undoStack.length) return false;
-  var s = null, k = 0;
+  let s = null, k = 0;
   while (k < count && undoStack.length){ s = undoStack.pop(); actions.pop(); k++; }
   if (!s) return false;
   restore(s, true);
@@ -250,16 +283,16 @@ export function isAITurn(){
 }
 
 export function findMove(to){
-  for (var k = 0; k < curMoves.length; k++) if (curMoves[k].to === to) return curMoves[k];
+  for (let k = 0; k < curMoves.length; k++) if (curMoves[k].to === to) return curMoves[k];
   return null;
 }
 /* 已进入「骷髅待确认」状态的那个着法 */
 export function pendingMove(){ return (armed >= 0 && sel >= 0) ? findMove(armed) : null; }
 /* 引爆波及的范围：Y=3、4、5 三行上的所有棋子，不分敌我、不论明暗 */
 export function blastZone(){
-  var out = [];
-  for (var i = 0; i < N; i++){
-    var p = game.board[i];
+  const out = [];
+  for (let i = 0; i < N; i++){
+    const p = game.board[i];
     if (!p || xy(i).y < 3 || xy(i).y > 5) continue;
     out.push({ p: p, i: i });
     if (p.under) out.push({ p: p.under, i: i });   /* 河格下被压的棋子同样会被炸掉 */
@@ -273,7 +306,7 @@ export function blastZone(){
 export function beginReplay(startJson, list){
   if (replay || !Array.isArray(list)) return false;
   try{
-    var o = JSON.parse(startJson);
+    const o = JSON.parse(startJson);
     if (!o || !o.g || !o.g.board) return false;
     savedState = {
       game: snapshot(),
@@ -300,15 +333,15 @@ function actionMatches(legal, a){
 /* 应用一步回放，并给这一步新增的日志打上「第几手」标记，
    供行棋记录点击跳转使用（不依赖日志下标，日志截断也不会错位）。 */
 function applyReplayAction(a, step){
-  var prev = game.log.length ? game.log[game.log.length - 1] : null;
+  const prev = game.log.length ? game.log[game.log.length - 1] : null;
   if (a.kind === "flip") doFlip(a.i, game.turn);
   else doMove(a, game.turn);
-  var from = 0;
+  let from = 0;
   if (prev){
-    var p = game.log.indexOf(prev);
+    const p = game.log.indexOf(prev);
     from = p >= 0 ? p + 1 : game.log.length - 1;   /* 旧日志已被截断时只标记最新一条 */
   }
-  for (var k = from; k < game.log.length; k++){
+  for (let k = from; k < game.log.length; k++){
     /* 非枚举属性：不会进入快照 JSON，回放前后局面比较不受影响 */
     Object.defineProperty(game.log[k], "step", { value: step, enumerable: false, configurable: true });
   }
@@ -323,19 +356,20 @@ function applyReplayAction(a, step){
 export function getReplayLog(){
   if (!replay) return null;
   if (replay.fullLog) return replay.fullLog;
-  var o;
+  let o;
   try{ o = JSON.parse(replay.start); }catch(e){ return null; }
   if (!o || !o.g || !o.g.board) return null;
-  var sim = o.g, base = sim.log.slice(), moves = [];
+  const sim = o.g, base = sim.log.slice(), moves = [];
   sim.log = [];
-  var prevGame = game;
+  const prevGame = game;
   game = sim;
   try{
-    for (var i = 0; i < replay.list.length; i++){
-      var a = replay.list[i];
+    for (let i = 0; i < replay.list.length; i++){
+      const a = replay.list[i];
       /* 与 replayStep/replayGoto 一致：记录不合法就停在这里 */
-      var acts = allActions(sim, sim.turn), ok = false;
-      for (var k = 0; k < acts.length; k++){
+      const acts = allActions(sim, sim.turn);
+      let ok = false;
+      for (let k = 0; k < acts.length; k++){
         if (actionMatches(acts[k], a)){ ok = true; break; }
       }
       if (!ok) break;
@@ -344,7 +378,7 @@ export function getReplayLog(){
         else doMove(a, sim.turn);
       }catch(e){ break; }
       /* 每个着法恰好追加一条日志；日志截断时最新一条仍在末尾 */
-      var line = sim.log[sim.log.length - 1];
+      const line = sim.log[sim.log.length - 1];
       if (line) moves.push({ step: i + 1, c: line.c, h: line.h });
       sim.turn = 1 - sim.turn;
     }
@@ -356,10 +390,11 @@ export function getReplayLog(){
 /* 走一步回放。返回 false 表示已播完或记录不合法（不合法时直接退出回放）。 */
 export function replayStep(){
   if (!replay || replay.idx >= replay.list.length) return false;
-  var i = replay.idx;
-  var a = replay.list[i];
-  var acts = allActions(game, game.turn), ok = false;
-  for (var k = 0; k < acts.length; k++){
+  const i = replay.idx;
+  const a = replay.list[i];
+  const acts = allActions(game, game.turn);
+  let ok = false;
+  for (let k = 0; k < acts.length; k++){
     if (actionMatches(acts[k], a)){ ok = true; break; }
   }
   if (!ok){ endReplay(); return false; }
@@ -373,16 +408,17 @@ export function replayStep(){
 /* 跳到第 n 手（0 = 回放起点）。始终从起点重建，保证前进/后退结果一致。 */
 export function replayGoto(n){
   if (!replay) return false;
-  var target = Math.max(0, Math.min(replay.list.length, n | 0));
-  var o;
+  const target = Math.max(0, Math.min(replay.list.length, n | 0));
+  let o;
   try{ o = JSON.parse(replay.start); }catch(e){ return false; }
   if (!o || !o.g || !o.g.board) return false;
   game = o.g; uidSeq = o.uid || uidSeq;
   posHistory = [positionKey(game)];
-  for (var i = 0; i < target; i++){
-    var a = replay.list[i];
-    var acts = allActions(game, game.turn), ok = false;
-    for (var k = 0; k < acts.length; k++){
+  for (let i = 0; i < target; i++){
+    const a = replay.list[i];
+    const acts = allActions(game, game.turn);
+  let ok = false;
+    for (let k = 0; k < acts.length; k++){
       if (actionMatches(acts[k], a)){ ok = true; break; }
     }
     if (!ok){ endReplay(); return false; }
@@ -398,7 +434,7 @@ export function replayGoto(n){
    回放前的对局被丢弃，悔棋/保存 Demo 都从这一刻重新开始。 */
 export function adoptReplay(){
   if (!replay) return false;
-  for (var i = 0; i < game.log.length; i++) delete game.log[i].step;
+  for (let i = 0; i < game.log.length; i++) delete game.log[i].step;
   replay = null;
   savedState = null;
   undoStack = []; actions = [];
@@ -413,7 +449,7 @@ export function endReplay(){
   replay = null;
   if (savedState){
     try{
-      var o = JSON.parse(savedState.game);
+      const o = JSON.parse(savedState.game);
       game = o.g; uidSeq = o.uid || uidSeq;
     }catch(e){}
     undoStack = savedState.undoStack;

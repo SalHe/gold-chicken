@@ -14,7 +14,7 @@ beforeAll(() => {
 
 describe("UI 全程对局", () => {
   it("60 盘随机对局不卡死、无异常", () => {
-    let games = 0, moves = 0, stucks = 0, errors = 0, confirmations = 0;
+    let games = 0, stucks = 0, errors = 0, confirmations = 0;
     for (let n = 0; n < 60; n++){
       try {
         state.newGame();
@@ -25,7 +25,7 @@ describe("UI 全程对局", () => {
           const acts = rules.allActions(G, G.turn);
           if (!acts.length) break;
           const a = acts[Math.random() * acts.length | 0];
-          if (a.kind === "flip"){ ui.onCell(a.i); moves++; continue; }
+          if (a.kind === "flip"){ ui.onCell(a.i); continue; }
 
           const before = G.last;
           ui.onCell(a.from);
@@ -36,7 +36,6 @@ describe("UI 全程对局", () => {
             if (G.last !== before) { errors++; break; }
             ui.onCell(a.to);
           }
-          moves++;
           if (G.last === before && !state.getGame().result){ stucks++; break; }
         }
       } catch (e) { errors++; }

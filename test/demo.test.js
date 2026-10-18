@@ -21,13 +21,13 @@ describe("Demo 回放", () => {
 
   it("按记录的起点与走子序列能重现最终局面", () => {
     state.setGame(newBoard());
-    var start = state.getBaseSnapshot();
+    const start = state.getBaseSnapshot();
     state.commit({ kind: "flip", i: R0 });
     state.commit({ kind: "move", from: B0, to: B1 });
     state.commit({ kind: "move", from: R0, to: R1 });
     state.commit({ kind: "move", from: B1, to: B0 });
-    var acts = state.getActions().slice();
-    var expected = JSON.stringify(state.getGame());
+    const acts = state.getActions().slice();
+    const expected = JSON.stringify(state.getGame());
 
     /* 换一盘无关的对局，再从起点重放 */
     state.setGame(mk([[xy2i(3, 1), LEOPARD]], [[xy2i(1, 7), LEOPARD]]));
@@ -42,8 +42,8 @@ describe("Demo 回放", () => {
     /* 回放前的对局：先走一步，保证悔棋栈非空 */
     state.setGame(newBoard());
     state.commit({ kind: "flip", i: R0 });
-    var before = state.snapshot();
-    var stackLen = state.getUndoStack().length;
+    const before = state.snapshot();
+    const stackLen = state.getUndoStack().length;
     expect(stackLen).toBe(1);
 
     expect(state.beginReplay(state.getBaseSnapshot(), [])).toBe(true);
@@ -62,7 +62,7 @@ describe("Demo 回放", () => {
 
   it("记录不合法时立即退出回放并还原", () => {
     state.setGame(newBoard());
-    var before = state.snapshot();
+    const before = state.snapshot();
     expect(state.beginReplay(state.getBaseSnapshot(), [
       { kind: "move", from: xy2i(2, 2), to: xy2i(2, 3) }
     ])).toBe(true);
@@ -73,7 +73,7 @@ describe("Demo 回放", () => {
 
   it("回放期间不能再开一盘回放", () => {
     state.setGame(newBoard());
-    var start = state.getBaseSnapshot();
+    const start = state.getBaseSnapshot();
     expect(state.beginReplay(start, [])).toBe(true);
     expect(state.beginReplay(start, [])).toBe(false);
   });
@@ -84,8 +84,8 @@ describe("悔棋不限制次数", () => {
 
   it("可以一路悔到开局，之后不再可悔", () => {
     state.setGame(newBoard());
-    var start = state.getBaseSnapshot();
-    var moves = [
+    const start = state.getBaseSnapshot();
+    const moves = [
       { kind: "flip", i: R0 },
       { kind: "move", from: B0, to: B1 },
       { kind: "move", from: R0, to: R1 },
@@ -97,7 +97,7 @@ describe("悔棋不限制次数", () => {
     expect(state.getActions().length).toBe(6);
 
     /* 一手一手地悔，悔棋栈始终保留 */
-    for (var k = 6; k > 0; k--){
+    for (let k = 6; k > 0; k--){
       expect(state.getUndoStack().length).toBe(k);
       expect(state.undo(1)).toBe(true);
     }
@@ -141,9 +141,9 @@ describe("回放跳转与接手", () => {
   /* 走三步并留下每一步的快照，供回放任意跳转后比对 */
   function setup(){
     state.setGame(newBoard());
-    var start = state.getBaseSnapshot();
-    var snaps = [state.snapshot()];
-    var moves = [
+    const start = state.getBaseSnapshot();
+    const snaps = [state.snapshot()];
+    const moves = [
       { kind: "flip", i: R0 },
       { kind: "move", from: B0, to: B1 },
       { kind: "move", from: R0, to: R1 }
@@ -153,7 +153,7 @@ describe("回放跳转与接手", () => {
   }
 
   it("可以向前、向后跳到任意一手", () => {
-    var o = setup();
+    const o = setup();
     expect(state.beginReplay(o.start, o.acts)).toBe(true);
 
     while (state.replayStep());
@@ -172,11 +172,11 @@ describe("回放跳转与接手", () => {
   });
 
   it("行棋记录带手数标记，可在跳转后重建", () => {
-    var o = setup();
+    const o = setup();
     expect(state.beginReplay(o.start, o.acts)).toBe(true);
 
     expect(state.replayStep()).toBe(true);
-    var log = state.getGame().log;
+    const log = state.getGame().log;
     expect(log.length).toBe(1);
     expect(log[0].step).toBe(1);
 
@@ -191,17 +191,17 @@ describe("回放跳转与接手", () => {
   });
 
   it("全程记录预演整段走子序列，未走的也带文本", () => {
-    var o = setup();
+    const o = setup();
     expect(state.beginReplay(o.start, o.acts)).toBe(true);
 
-    var full = state.getReplayLog();
+    const full = state.getReplayLog();
     expect(full.base).toEqual([]);
     expect(full.moves.map(m => m.step)).toEqual([1, 2, 3]);
     expect(full.moves.every(m => m.h && m.c)).toBe(true);
 
     /* 预演出的文本与真正走到那一步时的日志逐条一致 */
     expect(state.replayGoto(3)).toBe(true);
-    var walked = state.getGame().log.filter(l => l.step);
+    const walked = state.getGame().log.filter(l => l.step);
     expect(walked.map(l => l.h)).toEqual(full.moves.map(m => m.h));
     expect(walked.map(l => l.c)).toEqual(full.moves.map(m => m.c));
 
@@ -210,7 +210,7 @@ describe("回放跳转与接手", () => {
   });
 
   it("可以把当前回放局面变成一局可继续的对局", () => {
-    var o = setup();
+    const o = setup();
     expect(state.beginReplay(o.start, o.acts)).toBe(true);
     expect(state.replayStep()).toBe(true);
     expect(state.replayStep()).toBe(true);     /* 停在第 2 手，轮到红方 */
@@ -233,7 +233,7 @@ describe("回放跳转与接手", () => {
 });
 
 describe("Demo 存储", () => {
-  var saved;
+  let saved;
   beforeEach(() => { saved = globalThis.localStorage; });
   afterEach(() => {
     if (saved === undefined) delete globalThis.localStorage;
@@ -241,7 +241,7 @@ describe("Demo 存储", () => {
   });
 
   function stub(){
-    var m = new Map();
+    const m = new Map();
     return {
       getItem: k => (m.has(k) ? m.get(k) : null),
       setItem: (k, v) => { m.set(k, String(v)); },
@@ -258,7 +258,7 @@ describe("Demo 存储", () => {
 
   it("保存、读取、删除一条 Demo", () => {
     globalThis.localStorage = stub();
-    var d = { id: "d1", at: 123, result: null, start: "{}", actions: [{ kind: "flip", i: 0 }] };
+    const d = { id: "d1", at: 123, result: null, start: "{}", actions: [{ kind: "flip", i: 0 }] };
     expect(demo.saveDemo(d)).toBe(true);
     expect(demo.listDemos().length).toBe(1);
     expect(demo.getDemo("d1").id).toBe("d1");
@@ -269,10 +269,10 @@ describe("Demo 存储", () => {
 
   it("新存的排在前面，最多保留 30 条", () => {
     globalThis.localStorage = stub();
-    for (var k = 0; k < 33; k++){
+    for (let k = 0; k < 33; k++){
       demo.saveDemo({ id: "d" + k, at: k, start: "{}", actions: [] });
     }
-    var list = demo.listDemos();
+    const list = demo.listDemos();
     expect(list.length).toBe(30);
     expect(list[0].id).toBe("d32");
   });
@@ -294,7 +294,7 @@ describe("Demo 存储", () => {
   }
 
   it("parseDemos 接受单条、数组与整份列表，跳过坏条目", () => {
-    var d = validDemo("d1");
+    const d = validDemo("d1");
     expect(demo.parseDemos(JSON.stringify(d))).toHaveLength(1);
     expect(demo.parseDemos(JSON.stringify([d, validDemo("d2")]))).toHaveLength(2);
     expect(demo.parseDemos("not json")).toEqual([]);
@@ -319,12 +319,12 @@ describe("Demo 存储", () => {
     globalThis.localStorage = stub();
     demo.importDemos(JSON.stringify([validDemo("d1", 1)]));
     demo.importDemos(JSON.stringify([validDemo("d1", 2)]));     /* 同 id、不同对局 */
-    var noId = validDemo("", 3);
+    const noId = validDemo("", 3);
     demo.importDemos(JSON.stringify([noId]));
 
-    var list = demo.listDemos();
+    const list = demo.listDemos();
     expect(list).toHaveLength(3);
-    var ids = list.map(function(d){ return d.id; });
+    const ids = list.map(function(d){ return d.id; });
     expect(ids.filter(function(x){ return x === "d1"; })).toHaveLength(1);
     ids.forEach(function(x){ expect(x).toBeTruthy(); });
     expect(new Set(ids).size).toBe(3);

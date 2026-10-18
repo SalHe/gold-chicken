@@ -6,6 +6,8 @@
 
 双方各十二枚棋子（一龙 / 二麒麟 / 三狮 / 四象 / 五虎 / 六豹 / 七狼 / 八狗 / 九狸 / 十猫 / 十一鼠 / 十二金鸡），开局全部盖在棋盘上，先手翻出的颜色即先手方阵营。靠前的吃靠后的，同子相吃同归于尽；龙上岸渴死，只有龙和象能下河（可从紧挨河界的四格陆地正走或斜着进入任一河格），河里不吃子也不兑子——入河时可以把敌方棋子压在下面，被压的子留在原格但不能动，压子一方离开后重新露出。堵岸后豹可从紧挨河界的陆地跳入任意河格引爆 Y3–Y5（站在岸上的豹不能下河，河里有没有棋子都能跳）；堵岸一方的象若正站在岸上，也可直接跃入任意一格河（象离开岸后堵岸随即解除）。详细规则见游戏内「规则详解」。
 
+和棋并不总是和棋：和棋判定成立时若仍在堵岸，且堵岸方按「同阶棋子抵消后，剩下的每一枚都能被对方剩下的棋子吃掉」的标准属于子力较弱，就改判堵岸方负；双方各剩两枚以上时，同一枚棋子长捉同一目标超过 10 个「威胁 → 目标逃走」回合，追方直接判负。无吃子手数只剩 10 手、长捉到第 9 回合，以及堵岸方子力较弱时，界面会提前警示。
+
 支持双人对弈、人机对弈（可选人先手或电脑先手）与 AI 对弈三种模式。AI 对弈可随时切到「单步」：暂停连走、逐手推进，单步状态下可以悔棋，再点「自动」恢复连走。
 
 设置中可以切换主题（跟随系统 / 浅色 / 深色）、棋子样式（汉字 / 图案 / 纯图案）、行棋与回放速度，以及音效与震动。「图案」在棋子画上方标出阶数，「纯图案」只显示棋子画、不显示数字。图案棋面使用十二枚棋子画：2048×2048 的原图裁掉底部水印、去掉透明边后缩成 192×192 的 WebP（十二张共约 150KB），构建时以 data URI 内联，产物仍是单文件。
@@ -17,11 +19,14 @@
 ## 开发
 
 ```sh
-npm install      # 安装 esbuild + vitest
+npm install      # 安装 esbuild + vitest + eslint
+npm run lint     # 运行 ESLint 代码风格检查
 npm test         # 运行全部测试
 npm run build    # 打包 src/ 到单文件 index.html
 npm run test:watch
 ```
+
+代码风格约定见 [STYLE.md](STYLE.md)。
 
 ## 目录
 
@@ -39,11 +44,13 @@ src/             # 源码（ES 模块）
   styles.css     样式
 test/            # Vitest 用例（含轻量 DOM 桩）
 build.mjs        # esbuild 打包脚本
-.github/workflows/deploy.yml   # CI：测试 → 构建 → 发布到 gh-pages
+eslint.config.js # ESLint 配置（flat config）
+STYLE.md         # 代码风格约定
+.github/workflows/deploy.yml   # CI：lint → 测试 → 构建 → 发布到 gh-pages
 ```
 
 `index.html` 是 `npm run build` 的产物，不入版本库。克隆后跑一次构建即可得到可双击游玩的单文件。`assets/` 存放未压缩的 2048×2048 原图（不入库）；`src/art/` 里是裁边缩放后的成品。
 
 ## 发布
 
-推送到 `main` 会触发 GitHub Actions：跑测试 → 构建 → 把 `index.html` 以孤立提交强制推送到 `gh-pages` 分支。GitHub Pages 的 Source 设为 **Deploy from a branch → gh-pages → / (root)** 即可。
+推送到 `main` 会触发 GitHub Actions：跑 lint 和测试 → 构建 → 把 `index.html` 以孤立提交强制推送到 `gh-pages` 分支。GitHub Pages 的 Source 设为 **Deploy from a branch → gh-pages → / (root)** 即可。

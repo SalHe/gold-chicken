@@ -20,7 +20,7 @@ describe("布局", () => {
     for (let i = 0; i < N; i++){
       const p = G.board[i];
       if (!p) continue;
-      const { x, y } = i2xy(i);
+      const { y } = i2xy(i);
       if (y === 4) bankOrRiver++;
       if (p.rv) faceUp++;
       perColor[p.c]++;
@@ -419,17 +419,158 @@ describe("死局守卫", () => {
   });
 });
 
+describe("堵岸改判与长捉", () => {
+  it("同阶抵消后，剩下的每一枚都有天敌才算子力较弱", () => {
+    /* 红：四象 + 九狸；黑：四象 + 八狗。抵消四象后，红九狸被黑八狗吃 */
+    let g = mk([[xy2i(1, 1), 4], [xy2i(2, 1), 9]], [[xy2i(4, 7), 4], [xy2i(3, 7), 8]]);
+    expect(rules.materialWeaker(g, "r", "b")).toBe(true);
+    /* 反过来黑八狗吃不了红九狸 */
+    expect(rules.materialWeaker(g, "b", "r")).toBe(false);
+
+    /* 同阶正好抵消，谁也不弱 */
+    g = mk([[xy2i(1, 1), 5]], [[xy2i(4, 7), 5]]);
+    expect(rules.materialWeaker(g, "r", "b")).toBe(false);
+
+    /* 鸡（12）能吃龙（1），所以红龙是弱的一方；龙吃不了鸡 */
+    g = mk([[xy2i(1, 1), DRAGON]], [[xy2i(4, 7), ROOSTER]]);
+    expect(rules.materialWeaker(g, "r", "b")).toBe(true);
+    expect(rules.materialWeaker(g, "b", "r")).toBe(false);
+  });
+
+  it("暗棋与被压住的棋子都计入子力", () => {
+    /* 暗黑鸡是红龙唯一的天敌；只看明棋会漏掉 */
+    let g = mk([[xy2i(1, 1), DRAGON]], [[xy2i(4, 7), ROOSTER, false]]);
+    expect(rules.materialWeaker(g, "r", "b")).toBe(true);
+    expect(rules.materialWeaker(g, "r", "b", true)).toBe(false);
+
+    /* 河格下面压着的四象，才是红十猫唯一的天敌 */
+    g = mk([[xy2i(2, 1), 10]], [[xy2i(2, 4), 9]]);
+    g.board[xy2i(2, 4)].under = { t: 4, c: "b", rv: true, uid: 99 };
+    expect(rules.materialWeaker(g, "r", "b")).toBe(true);
+  });
+
+  it("60 手无吃子时，堵岸方子力较弱则改判其负", () => {
+    state.setGame(mk(
+      [[xy2i(1, 4), 9], [xy2i(4, 4), 7], [xy2i(1, 1), 8]],
+      [[xy2i(4, 7), 4], [xy2i(4, 6), 5]],
+      { noCap: 60 }
+    ));
+    state.checkResult();
+    const r = state.getGame().result;
+    expect(r.kind).toBe("win");
+    expect(r.winner).toBe("b");
+    expect(r.blockadeLoss).toBe(true);
+    expect(r.why).toContain("改判红方负");
+  });
+
+  it("堵岸方子力不弱时仍然判和", () => {
+    state.setGame(mk(
+      [[xy2i(1, 4), DRAGON], [xy2i(4, 4), 2], [xy2i(1, 1), 3]],
+      [[xy2i(4, 7), 4], [xy2i(4, 6), 5]],
+      { noCap: 60 }
+    ));
+    state.checkResult();
+    expect(state.getGame().result.kind).toBe("draw");
+  });
+
+  /* 构造一条可循环的追逃路线：
+     红二麒麟从 (2,1) 追，黑五虎从 (1,2) 逃；(2,2)/(2,3) 与 (1,2)/(1,3)
+     来回换位。每轮都是「追方形成威胁 → 目标自己逃走」。 */
+  function chaseSetup(extra){
+    return mk(
+      [[xy2i(2, 1), 2], [xy2i(4, 7), 10]],
+      [[xy2i(1, 2), 5], [xy2i(4, 6), 9]],
+      extra || {}
+    );
+  }
+  function playChaseRounds(start, end){
+    for (let round = start; round < end; round++){
+      /* 追子：r0 (2,1)→(1,1)，r1 (1,1)→(1,2)，此后在 (1,2)/(1,3) 之间来回 */
+      let rm;
+      if (round === 0) rm = [xy2i(2, 1), xy2i(1, 1)];
+      else if (round === 1) rm = [xy2i(1, 1), xy2i(1, 2)];
+      else if (round % 2 === 0) rm = [xy2i(1, 2), xy2i(1, 3)];
+      else rm = [xy2i(1, 3), xy2i(1, 2)];
+      state.commit({ kind: "move", from: rm[0], to: rm[1] });
+      /* 目标：r0 (1,2)→(2,2)，此后在 (2,2)/(2,3) 之间来回 */
+      let bm;
+      if (round === 0) bm = [xy2i(1, 2), xy2i(2, 2)];
+      else if (round % 2 === 0) bm = [xy2i(2, 3), xy2i(2, 2)];
+      else bm = [xy2i(2, 2), xy2i(2, 3)];
+      state.commit({ kind: "move", from: bm[0], to: bm[1] });
+    }
+  }
+
+  it("同一追子同一目标超过 10 个追逃回合，追方直接判负", () => {
+    state.setGame(chaseSetup());
+    playChaseRounds(0, 10);
+    expect(state.getGame().result).toBe(null);
+    expect(state.getGame().chase.rounds).toBe(10);
+
+    playChaseRounds(10, 11);
+    const r = state.getGame().result;
+    expect(r).not.toBe(null);
+    expect(r.kind).toBe("win");
+    expect(r.winner).toBe("b");
+    expect(r.longChase).toBe(true);
+    expect(state.getGame().chase.by).toBe("r");
+  });
+
+  it("目标不逃、换追子或翻棋都会重置长捉计数", () => {
+    /* 目标方改走别的子：不算逃走 */
+    state.setGame(chaseSetup());
+    state.commit({ kind: "move", from: xy2i(2, 1), to: xy2i(1, 1) });
+    expect(state.getGame().chase.rounds).toBe(0);
+    state.commit({ kind: "move", from: xy2i(4, 6), to: xy2i(4, 5) });
+    expect(state.getGame().chase).toBe(null);
+
+    /* 先正常逃一次，凑满一回合 */
+    state.setGame(chaseSetup());
+    state.commit({ kind: "move", from: xy2i(2, 1), to: xy2i(1, 1) });
+    state.commit({ kind: "move", from: xy2i(1, 2), to: xy2i(2, 2) });
+    expect(state.getGame().chase.rounds).toBe(1);
+
+    /* 追方改走别的子：不再算同一追子 */
+    state.setGame(chaseSetup());
+    state.commit({ kind: "move", from: xy2i(2, 1), to: xy2i(1, 1) });
+    state.commit({ kind: "move", from: xy2i(1, 2), to: xy2i(2, 2) });
+    state.commit({ kind: "move", from: xy2i(4, 7), to: xy2i(3, 7) });
+    expect(state.getGame().chase).toBe(null);
+
+    /* 翻开暗棋同样重置 */
+    state.setGame(chaseSetup());
+    state.getGame().board[xy2i(3, 7)] = { t: 11, c: "b", rv: false, uid: 50 };
+    state.commit({ kind: "move", from: xy2i(2, 1), to: xy2i(1, 1) });
+    expect(state.getGame().chase).not.toBe(null);
+    state.commit({ kind: "flip", i: xy2i(3, 7) });
+    expect(state.getGame().chase).toBe(null);
+  });
+
+  it("目标走完仍被同一追子威胁，不算逃走", () => {
+    /* 红金鸡能飞遍全盘；黑一龙在远离河界的陆地上，怎么走都还在鸡的威胁里 */
+    state.setGame(mk(
+      [[xy2i(1, 1), ROOSTER], [xy2i(4, 7), 10]],
+      [[xy2i(2, 2), DRAGON], [xy2i(4, 6), 9]]
+    ));
+    state.commit({ kind: "move", from: xy2i(1, 1), to: xy2i(1, 3) });
+    expect(state.getGame().chase).not.toBe(null);
+    expect(state.getGame().chase.targetUid).toBe(3);
+    state.commit({ kind: "move", from: xy2i(2, 2), to: xy2i(2, 3) });
+    expect(state.getGame().chase.rounds).toBe(0);
+    expect(state.getGame().chase.pending).toBe(true);
+  });
+});
+
 describe("对局 soak", () => {
   /* 整局对弈是同步计算；每跑几盘让出一次事件循环，避免长时间占住
      worker 线程导致 Vitest 的 RPC 心跳超时（表现为 unhandled error）。 */
   it("120 局自然终局无死锁", async () => {
-    let stalls = 0, games = 0, wins = 0, draws = 0, maxPly = 0;
+    let stalls = 0, draws = 0, maxPly = 0;
     /* 终局由 60 手无吃子/死局/吃光保证；这里只是防止实现死循环的守卫，
        取 800 手留足余量（实测单局最长约 400 手）。 */
     const PLY_CAP = 800;
     for (let n = 0; n < 120; n++){
       state.newGame();
-      games++;
       let ply = 0;
       while (ply < PLY_CAP){
         const G = state.getGame();
@@ -452,7 +593,7 @@ describe("对局 soak", () => {
       }
       maxPly = Math.max(maxPly, ply);
       if (ply >= PLY_CAP && !state.getGame().result) stalls++;
-      if (state.getGame().result && state.getGame().result.kind === "win") wins++; else draws++;
+      if (!state.getGame().result || state.getGame().result.kind !== "win") draws++;
       if (n % 5 === 4) await new Promise(r => setTimeout(r, 0));
     }
     expect(stalls).toBe(0);

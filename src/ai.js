@@ -8,13 +8,15 @@
 import { N, W, H, DRAGON, ELEPHANT, LEOPARD, ROOSTER, VAL } from "./constants.js";
 import {
   xy, id, movesFor, allActions, applyMove, counts, canEat, blockadeColor,
-  deadPosition, isRiver, isBank, touchesRiver, crossesRiver, positionKey
+  deadPosition, isRiver, isBank, touchesRiver, crossesRiver, positionKey,
+  updateChase, chaseLoss, blockadeDrawLoser
 } from "./rules.js";
 
 /* 快速深拷贝：只复制对局所需字段。搜索里会克隆成千上万个节点，
    JSON 序列化的开销太大；棋子对象也没有多余字段需要保留。 */
 export function cloneG(g){
-  var board = new Array(N), i, p, q;
+  const board = new Array(N);
+  let i, p, q;
   for (i = 0; i < N; i++){
     p = g.board[i];
     if (!p){ board[i] = null; continue; }
@@ -32,14 +34,19 @@ export function cloneG(g){
     last: g.last,
     caps: { r: g.caps.r.slice(), b: g.caps.b.slice() },
     log: g.log,
-    pulse: g.pulse
+    pulse: g.pulse,
+    chase: g.chase
+      ? { by: g.chase.by, chaserUid: g.chase.chaserUid, targetUid: g.chase.targetUid,
+          rounds: g.chase.rounds, pending: g.chase.pending }
+      : null
   };
 }
 
 export function adjacentCount(g, i){
-  var c = xy(i), n = 0, dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  for (var k = 0; k < 4; k++){
-    var nx = c.x + dirs[k][0], ny = c.y + dirs[k][1];
+  const c = xy(i), dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  let n = 0;
+  for (let k = 0; k < 4; k++){
+    const nx = c.x + dirs[k][0], ny = c.y + dirs[k][1];
     if (nx < 1 || nx > W || ny < 1 || ny > H) continue;
     if (g.board[id(nx, ny)]) n++;
   }
@@ -55,8 +62,8 @@ const W_MY_THREAT = 0.35;
 const RIVER_CELLS = [id(2, 4), id(3, 4)];
 const BANK_CELLS = [id(1, 4), id(4, 4)];
 const NEI = [];
-for (var ni = 0; ni < N; ni++){
-  var nc = xy(ni), arr = [];
+for (let ni = 0; ni < N; ni++){
+  const nc = xy(ni), arr = [];
   if (nc.x > 1) arr.push(id(nc.x - 1, nc.y));
   if (nc.x < W) arr.push(id(nc.x + 1, nc.y));
   if (nc.y > 1) arr.push(id(nc.x, nc.y - 1));
@@ -66,21 +73,27 @@ for (var ni = 0; ni < N; ni++){
 
 /* ---------- 终局 / 和棋 ---------- */
 /* 走完一手后，从行棋方 mover 的视角返回终局分；null 表示未结束。
-   镜像 state.checkResult：吃光 > 60 手 / 死局 > 困毙。 */
+   镜像 state.checkResult：吃光 > 长捉 > 60 手 / 死局（可能改判堵岸负）> 困毙。 */
 export function terminalScore(g, mover){
-  var me = g.pcolor[mover];
+  const me = g.pcolor[mover];
   if (!me) return null;
-  var opp = me === "r" ? "b" : "r";
-  var c = counts(g);
+  const opp = me === "r" ? "b" : "r";
+  const c = counts(g);
   if (c[opp] === 0) return c[me] === 0 ? 0 : WIN;
   if (c[me] === 0) return -WIN;
-  if (g.noCap >= 60 || deadPosition(g)) return 0;
+  const chaser = chaseLoss(g);
+  if (chaser) return chaser === me ? -WIN : WIN;
+  if (g.noCap >= 60 || deadPosition(g)){
+    /* 只用公开信息：还有暗棋时不冒险判定堵岸方子力 */
+    const loser = blockadeDrawLoser(g, true);
+    return loser ? (loser === me ? -WIN : WIN) : 0;
+  }
   if (opponentStuck(g, opp)) return WIN;
   return null;
 }
 /* 对方是否已无任何合法行动（无暗棋可翻、已翻开的子全不能动） */
 function opponentStuck(g, color){
-  var i, p;
+  let i, p;
   for (i = 0; i < N; i++){
     p = g.board[i];
     if (p && !p.rv) return false;              /* 还有暗棋可翻 */
@@ -97,9 +110,9 @@ function opponentStuck(g, color){
    龙踏上「岸」会渴死，因此不构成保护。 */
 function canReachCell(g, from, to, bl){
   if (from === to) return false;
-  var p = g.board[from];
+  const p = g.board[from];
   if (!p || !p.rv) return false;
-  var cf = xy(from), ct = xy(to);
+  const cf = xy(from), ct = xy(to);
   if (isRiver(from)){
     if (bl && bl !== p.c) return false;         /* 河中被敌方堵岸冰封 */
     return !isRiver(to) && touchesRiver(to);
@@ -117,16 +130,17 @@ function canReachCell(g, from, to, bl){
 /* 吃掉 to 格的敌子后，对方是否有人能立刻反吃（只查可能的反吃者：
    四邻、河格出水、任意位置的金鸡）。 */
 function isProtected(g, target, color, attackerIdx, bl){
-  var a = g.board[attackerIdx];
+  const a = g.board[attackerIdx];
   if (!a) return false;
-  var cands = NEI[target].slice(), i, q;
+  const cands = NEI[target].slice();
+  let i, q;
   if (touchesRiver(target)) cands.push(RIVER_CELLS[0], RIVER_CELLS[1]);
   for (i = 0; i < N; i++){
     q = g.board[i];
     if (q && q.rv && q.c === color && q.t === ROOSTER) cands.push(i);
   }
   for (i = 0; i < cands.length; i++){
-    var j = cands[i];
+    const j = cands[i];
     if (j === target) continue;
     q = g.board[j];
     if (!q || !q.rv || q.c !== color) continue;
@@ -139,15 +153,15 @@ function isProtected(g, target, color, attackerIdx, bl){
 /* 一次交战的净子力收益（攻击方视角）。同阶邀兑为 0；压子只算压制，
    龙上岸渴死要扣掉自己。 */
 export function attackGain(g, from, to, ctx){
-  var a = g.board[from], d = g.board[to];
+  const a = g.board[from], d = g.board[to];
   if (!a || !d || !d.rv) return 0;
-  var kind = ctx.kindAt[from] && ctx.kindAt[from][to];
+  const kind = ctx.kindAt[from] && ctx.kindAt[from][to];
   if (!kind) return 0;
   if (kind === "press") return 0.3 * VAL[d.t];
   if (kind === "thirst") return VAL[d.t] - VAL[a.t];
   if (kind !== "capture") return 0;
   if (a.t === d.t) return 0;                     /* 同归于尽，不赚子力 */
-  var gain = VAL[d.t];
+  let gain = VAL[d.t];
   if (isProtected(g, to, d.c, from, ctx.bl)) gain -= VAL[a.t];
   return gain;
 }
@@ -155,7 +169,7 @@ export function attackGain(g, from, to, ctx){
 function otherColor(c){ return c === "r" ? "b" : "r"; }
 /* 只按已翻开的棋子算子力差：暗棋身份不可读，双方都不计入。 */
 function materialLead(g, col){
-  var mine = 0, op = 0, i, p;
+  let mine = 0, op = 0, i, p;
   for (i = 0; i < N; i++){
     p = g.board[i];
     if (!p) continue;
@@ -165,10 +179,10 @@ function materialLead(g, col){
   return mine - op;
 }
 /* 是否已进入敌方半场：红方的敌场在河下（y≥5），黑方在河上（y≤3）。 */
-function enemyHalf(col, i){ var y = xy(i).y; return col === "r" ? y >= 5 : y <= 3; }
+function enemyHalf(col, i){ const y = xy(i).y; return col === "r" ? y >= 5 : y <= 3; }
 /* 两格是否在河界同一侧；河/岸（y=4）上的子两侧都够得着，视为同侧。 */
 function sameBankSide(a, b){
-  var ya = xy(a).y, yb = xy(b).y;
+  const ya = xy(a).y, yb = xy(b).y;
   if (ya === 4 || yb === 4) return true;
   return (ya <= 3) === (yb <= 3);
 }
@@ -176,10 +190,10 @@ function sameBankSide(a, b){
    都不构成占领）。exceptCell 上的子若走到 target 会空出自己的岸，
    因此补不齐另一岸，要排除。 */
 function canStepTo(list, mvs, target, exceptCell){
-  for (var i = 0; i < list.length; i++){
+  for (let i = 0; i < list.length; i++){
     if (list[i] === exceptCell) continue;
-    var arr = mvs[list[i]] || [];
-    for (var k = 0; k < arr.length; k++){
+    const arr = mvs[list[i]] || [];
+    for (let k = 0; k < arr.length; k++){
       if (arr[k].to === target && arr[k].kind === "move") return true;
     }
   }
@@ -192,14 +206,15 @@ function canStepTo(list, mvs, target, exceptCell){
    这里对「一龙 + 一枚非龙/非金鸡棋子」做可达性博弈预计算，得到
    龙胜 / 守和 / 守胜。只采用「无论谁先走结论都一样」的局面——搜索
    中的 g.turn 不随节点推进，估值拿不到真正的行棋方。 */
-var SOLO_TABLES = {};
+const SOLO_TABLES = {};
 function soloTable(type){
   if (SOLO_TABLES[type]) return SOLO_TABLES[type];
-  var P = N * N, d, o, i, j, p;
-  var dNext = new Array(P), oNext = new Array(P);
-  var dWin = new Uint8Array(P), dDraw = new Uint8Array(P), oWin = new Uint8Array(P);
+  const P = N * N;
+  let d, o, i, j, p;
+  const dNext = new Array(P), oNext = new Array(P);
+  const dWin = new Uint8Array(P), dDraw = new Uint8Array(P), oWin = new Uint8Array(P);
   function mkSolo(dc, oc){
-    var b = new Array(N).fill(null);
+    const b = new Array(N).fill(null);
     b[dc] = { t: DRAGON, c: "r", rv: true, uid: 1 };
     b[oc] = { t: type, c: "b", rv: true, uid: 2 };
     return { board: b, turn: 0, pcolor: ["r", "b"], caps: { r: [], b: [] },
@@ -211,7 +226,7 @@ function soloTable(type){
     for (o = 0; o < N; o++){
       if (o === d) continue;
       p = d * N + o;
-      var ms = movesFor(mkSolo(d, o), d), arr = [], to;
+      let ms = movesFor(mkSolo(d, o), d), arr = [], to;
       for (i = 0; i < ms.length; i++){
         to = ms[i].to;
         if (ms[i].kind === "thirst"){
@@ -234,9 +249,9 @@ function soloTable(type){
     }
   }
   /* DW：龙可强迫取胜；FW：守方可强迫取胜（压住龙）。两者都不在 = 和。 */
-  var DW0 = new Uint8Array(P), DW1 = new Uint8Array(P),
+  const DW0 = new Uint8Array(P), DW1 = new Uint8Array(P),
       FW0 = new Uint8Array(P), FW1 = new Uint8Array(P);
-  var changed = true;
+  let changed = true;
   while (changed){
     changed = false;
     for (d = 0; d < N; d++){
@@ -246,14 +261,14 @@ function soloTable(type){
         p = d * N + o;
         /* 轮到龙 */
         if (!DW0[p]){
-          var ok = !!dWin[p];
+          let ok = !!dWin[p];
           for (j = 0; !ok && j < dNext[p].length; j++){
             if (DW1[dNext[p][j] * N + o]) ok = true;
           }
           if (ok){ DW0[p] = 1; changed = true; }
         }
         if (!FW0[p] && !dWin[p] && !dDraw[p]){
-          var fall = true;
+          let fall = true;
           for (j = 0; j < dNext[p].length; j++){
             if (!FW1[dNext[p][j] * N + o]){ fall = false; break; }
           }
@@ -261,14 +276,14 @@ function soloTable(type){
         }
         /* 轮到守方 */
         if (!DW1[p] && !oWin[p]){
-          var all = true;
+          let all = true;
           for (j = 0; j < oNext[p].length; j++){
             if (!DW0[d * N + oNext[p][j]]){ all = false; break; }
           }
           if (all){ DW1[p] = 1; changed = true; }
         }
         if (!FW1[p]){
-          var fok = !!oWin[p];
+          let fok = !!oWin[p];
           for (j = 0; !fok && j < oNext[p].length; j++){
             if (FW0[d * N + oNext[p][j]]) fok = true;
           }
@@ -277,10 +292,10 @@ function soloTable(type){
       }
     }
   }
-  var st = new Int8Array(P);                   /* 1 龙胜 / -1 守胜 / 0 和 / 2 视行棋方 */
+  const st = new Int8Array(P);                   /* 1 龙胜 / -1 守胜 / 0 和 / 2 视行棋方 */
   for (p = 0; p < P; p++){
-    var dw = DW0[p] && DW1[p], fw = FW0[p] && FW1[p];
-    var none = !DW0[p] && !DW1[p] && !FW0[p] && !FW1[p];
+    const dw = DW0[p] && DW1[p], fw = FW0[p] && FW1[p];
+    const none = !DW0[p] && !DW1[p] && !FW0[p] && !FW1[p];
     st[p] = (dw && !fw) ? 1 : ((fw && !dw) ? -1 : (none ? 0 : 2));
   }
   SOLO_TABLES[type] = st;
@@ -288,7 +303,8 @@ function soloTable(type){
 }
 /* 纯双子残局（一龙 + 一枚非龙/非金鸡棋子）直接查表；其它局面返回 null。 */
 function soloDragonScore(g, col){
-  var cells = [], i, p;
+  const cells = [];
+  let i, p;
   for (i = 0; i < N; i++){
     p = g.board[i];
     if (!p) continue;
@@ -297,13 +313,13 @@ function soloDragonScore(g, col){
     if (cells.length > 2) return null;
   }
   if (cells.length !== 2) return null;
-  var a = g.board[cells[0]], b = g.board[cells[1]];
-  var dc, oc, ot, dragonColor;
+  const a = g.board[cells[0]], b = g.board[cells[1]];
+  let dc, oc, ot, dragonColor;
   if (a.t === DRAGON && b.t !== DRAGON){ dc = cells[0]; oc = cells[1]; ot = b.t; dragonColor = a.c; }
   else if (b.t === DRAGON && a.t !== DRAGON){ dc = cells[1]; oc = cells[0]; ot = a.t; dragonColor = b.c; }
   else return null;
   if (ot === ROOSTER || a.c === b.c || isBank(dc)) return null;
-  var st = soloTable(ot)[dc * N + oc];
+  const st = soloTable(ot)[dc * N + oc];
   if (st === 2) return null;                   /* 取决于谁先走，交回常规估值 */
   if (st === 0) return 0;
   return (st > 0) === (dragonColor === col) ? WIN : -WIN;
@@ -312,11 +328,12 @@ function soloDragonScore(g, col){
 /* ---------- 估值 ---------- */
 /* 只依据「已翻开」的信息估值（暗棋身份不参与任何计算） */
 export function evalPos(g, col){
-  var solo = soloDragonScore(g, col);
+  const solo = soloDragonScore(g, col);
   if (solo !== null) return solo;
-  var opp = otherColor(col);
-  var mine = [], theirs = [], mvs = {}, kindAt = {}, i, p;
-  var myMat = 0, opMat = 0, totalPieces = 0;
+  const opp = otherColor(col);
+  const mine = [], theirs = [], mvs = {}, kindAt = {};
+  let i, p;
+  let myMat = 0, opMat = 0, totalPieces = 0;
 
   for (i = 0; i < N; i++){
     p = g.board[i];
@@ -326,8 +343,8 @@ export function evalPos(g, col){
     if (p.c === col){ mine.push(i); myMat += VAL[p.t]; }
     else { theirs.push(i); opMat += VAL[p.t]; }
     mvs[i] = movesFor(g, i);
-    var km = null;
-    for (var k = 0; k < mvs[i].length; k++){
+    let km = null;
+    for (let k = 0; k < mvs[i].length; k++){
       if (!km) km = {};
       km[mvs[i][k].to] = mvs[i][k].kind;
     }
@@ -335,21 +352,21 @@ export function evalPos(g, col){
   }
   /* 河下被压住的棋子仍然活着，也要计入子力 */
   for (i = 0; i < RIVER_CELLS.length; i++){
-    var top = g.board[RIVER_CELLS[i]];
-    var u = top && top.under;
+    const top = g.board[RIVER_CELLS[i]];
+    const u = top && top.under;
     if (!u) continue;
     if (u.c === col) myMat += VAL[u.t]; else opMat += VAL[u.t];
   }
 
   /* 子力差在残局里权重更大：领先时乐于兑子，落后时回避兑子 */
-  var s = (myMat - opMat) * (1 + 320 / (myMat + opMat + 320));
-  var lead = myMat - opMat;
+  let s = (myMat - opMat) * (1 + 320 / (myMat + opMat + 320));
+  const lead = myMat - opMat;
 
-  var ctx = { mvs: mvs, kindAt: kindAt, bl: blockadeColor(g), dive: { r: false, b: false } };
+  const ctx = { mvs: mvs, kindAt: kindAt, bl: blockadeColor(g), dive: { r: false, b: false } };
   for (i = 0; i < mine.length; i++){
     p = g.board[mine[i]];
     if (p.t === LEOPARD){
-      for (var d = 0; d < mvs[mine[i]].length; d++){
+      for (let d = 0; d < mvs[mine[i]].length; d++){
         if (mvs[mine[i]][d].kind === "dive"){ ctx.dive[p.c] = true; break; }
       }
     }
@@ -357,7 +374,7 @@ export function evalPos(g, col){
   for (i = 0; i < theirs.length; i++){
     p = g.board[theirs[i]];
     if (p.t === LEOPARD){
-      for (var e = 0; e < mvs[theirs[i]].length; e++){
+      for (let e = 0; e < mvs[theirs[i]].length; e++){
         if (mvs[theirs[i]][e].kind === "dive"){ ctx.dive[p.c] = true; break; }
       }
     }
@@ -365,7 +382,7 @@ export function evalPos(g, col){
 
   /* 龙与金鸡是天然的制衡关系：金鸡是唯一能稳定换掉龙的子，龙又吃不了金鸡。
      暗棋不参与判断，这里只看已经翻开的棋子。 */
-  var myDragon = -1, opDragon = -1, myRooster = -1, opRooster = -1;
+  let myDragon = -1, opDragon = -1, myRooster = -1, opRooster = -1;
   for (i = 0; i < mine.length; i++){
     p = g.board[mine[i]];
     if (p.t === DRAGON) myDragon = mine[i];
@@ -380,7 +397,7 @@ export function evalPos(g, col){
   /* 威胁：区分吃子 / 邀兑 / 压子 / 渴死，并考虑目标有无保护。
      对手「亏子」的攻击不是威胁（它不会走），不能倒过来给我加分——
      否则把自己的子摆在对手嘴边当诱饵反而成了收益，还会阻碍腾挪。 */
-  var a, b, gain;
+  let a, b, gain;
   for (a = 0; a < mine.length; a++){
     for (b = 0; b < theirs.length; b++){
       s += W_MY_THREAT * attackGain(g, mine[a], theirs[b], ctx);
@@ -392,7 +409,7 @@ export function evalPos(g, col){
       if (gain <= 0) continue;
       /* 明显领先时，为救一枚弱子而回防并不划算：损失一点子力，
          换来强子继续压上的主动权，往往更接近「以弱换强」。 */
-      var tw = (lead > 80 && g.board[mine[b]].t !== ROOSTER &&
+      const tw = (lead > 80 && g.board[mine[b]].t !== ROOSTER &&
                 VAL[g.board[mine[b]].t] <= 22) ? 0.4 : 1;
       s -= W_OPP_THREAT * gain * tw;
     }
@@ -421,14 +438,14 @@ export function evalPos(g, col){
      但金鸡能全盘飞行，单靠逼近毫无意义——只有己方堵岸把它锁在
      河界一侧、且猎手与它同处一侧时，收紧包围才有价值。 */
   if (opRooster >= 0 && ctx.bl === col){
-    var rx = xy(opRooster).x, ry = xy(opRooster).y;
+    const rx = xy(opRooster).x, ry = xy(opRooster).y;
     for (i = 0; i < mine.length; i++){
-      var hunter = g.board[mine[i]];
+      const hunter = g.board[mine[i]];
       if (hunter.t === ROOSTER || hunter.t === DRAGON) continue;
       if (!canEat(hunter, g.board[opRooster])) continue;
       if (!sameBankSide(mine[i], opRooster)) continue;
-      var hc = xy(mine[i]);
-      var rd = Math.abs(hc.x - rx) + Math.abs(hc.y - ry);
+      const hc = xy(mine[i]);
+      const rd = Math.abs(hc.x - rx) + Math.abs(hc.y - ry);
       if (rd === 1) s += 12;
       else if (rd === 2) s += 4;
       else if (rd === 3) s += 1.5;
@@ -440,11 +457,11 @@ export function evalPos(g, col){
      转头压向敌子，用弱子换对方大子，才更快绞杀干净。
      只在「弱子正被敌子盯上」时生效，避免领先方无端弃子。 */
   if (lead > 80 && theirs.length && mine.length){
-    var chased = 0;
+    let chased = 0;
     for (i = 0; i < mine.length; i++){
-      var wp = g.board[mine[i]];
+      const wp = g.board[mine[i]];
       if (wp.t === ROOSTER || VAL[wp.t] > 22) continue;
-      for (var ca = 0; ca < theirs.length; ca++){
+      for (let ca = 0; ca < theirs.length; ca++){
         if (kindAt[theirs[ca]] && kindAt[theirs[ca]][mine[i]] === "capture"){
           chased++;
           break;
@@ -452,14 +469,14 @@ export function evalPos(g, col){
       }
     }
     if (chased){
-      var press = 0;
+      let press = 0;
       for (i = 0; i < mine.length; i++){
-        var sp = g.board[mine[i]];
+        const sp = g.board[mine[i]];
         if (sp.t === ROOSTER || VAL[sp.t] < 30) continue;   /* 只动强子 */
-        var pd = 99;
-        for (var cj = 0; cj < theirs.length; cj++){
+        let pd = 99;
+        for (let cj = 0; cj < theirs.length; cj++){
           if (!canEat(sp, g.board[theirs[cj]])) continue;
-          var dd = Math.abs(xy(mine[i]).x - xy(theirs[cj]).x) +
+          const dd = Math.abs(xy(mine[i]).x - xy(theirs[cj]).x) +
                    Math.abs(xy(mine[i]).y - xy(theirs[cj]).y);
           if (dd < pd) pd = dd;
         }
@@ -485,14 +502,15 @@ export function evalPos(g, col){
      只奖励「对方占不到便宜」的己方子接近目标：被目标白吃不算追猎，
      同阶邀兑在领先时可以接受。距离越近分越高，避免来回摆动。 */
   if (lead > 50 && theirs.length){
-    var prox = 0;
+    let prox = 0;
     for (i = 0; i < mine.length; i++){
-      var mp = g.board[mine[i]], nd = 99;
+      const mp = g.board[mine[i]];
+      let nd = 99;
       if (mp.t === ROOSTER) continue;               /* 金鸡不受距离限制 */
-      for (var hj = 0; hj < theirs.length; hj++){
-        var hq = g.board[theirs[hj]];
+      for (let hj = 0; hj < theirs.length; hj++){
+        const hq = g.board[theirs[hj]];
         if (!canEat(mp, hq) || hq.t < mp.t) continue;
-        var hd = Math.abs(xy(mine[i]).x - xy(theirs[hj]).x) +
+        const hd = Math.abs(xy(mine[i]).x - xy(theirs[hj]).x) +
                  Math.abs(xy(mine[i]).y - xy(theirs[hj]).y);
         if (hd < nd) nd = hd;
       }
@@ -509,18 +527,18 @@ export function evalPos(g, col){
      按「目标」计分：同一个目标有再多猎手也只算一次（两面夹击
      另有小加成），避免扎堆追杀；多个目标同时被压住另加一笔。 */
   if (lead > 50 && theirs.length >= 2){
-    var covered = 0, coord = 0;
+    let covered = 0, coord = 0;
     for (i = 0; i < theirs.length; i++){
-      var cq = g.board[theirs[i]];
+      const cq = g.board[theirs[i]];
       if (cq.t === ROOSTER) continue;        /* 金鸡会飞，围不住 */
-      var bestD = 99, guards = 0, ci;
+      let bestD = 99, guards = 0, ci;
       for (ci = 0; ci < mine.length; ci++){
-        var cp = g.board[mine[ci]];
+        const cp = g.board[mine[ci]];
         if (cp.t === ROOSTER) continue;
         if (!canEat(cp, cq) || cq.t < cp.t) continue;
         if (!sameBankSide(mine[ci], theirs[i])) continue;
-        var cc = xy(mine[ci]), tc = xy(theirs[i]);
-        var cd = Math.abs(cc.x - tc.x) + Math.abs(cc.y - tc.y);
+        const cc = xy(mine[ci]), tc = xy(theirs[i]);
+        const cd = Math.abs(cc.x - tc.x) + Math.abs(cc.y - tc.y);
         if (cd < bestD) bestD = cd;
         if (cd <= 2) guards++;
       }
@@ -535,7 +553,7 @@ export function evalPos(g, col){
   }
 
   /* 机动性：金鸡的全盘飞行也会体现在这里 */
-  var myMob = 0, opMob = 0;
+  let myMob = 0, opMob = 0;
   for (i = 0; i < mine.length; i++) myMob += Math.min(mvs[mine[i]].length, 20);
   for (i = 0; i < theirs.length; i++) opMob += Math.min(mvs[theirs[i]].length, 20);
   s += (myMob - opMob) * 0.3;
@@ -545,13 +563,13 @@ export function evalPos(g, col){
      对方没得等，只能先走进我方能吃到的范围（楚格茨旺）。 */
   if (lead > 50 && theirs.length && theirs.length <= 2){
     for (i = 0; i < theirs.length; i++){
-      var tq = g.board[theirs[i]];
+      const tq = g.board[theirs[i]];
       if (tq.t === ROOSTER) continue;      /* 金鸡全盘飞行，逼角对它无效 */
-      var txy = xy(theirs[i]);
-      var edge = Math.min(txy.x - 1, W - txy.x, txy.y - 1, H - txy.y);
+      const txy = xy(theirs[i]);
+      const edge = Math.min(txy.x - 1, W - txy.x, txy.y - 1, H - txy.y);
       if (edge === 0) s += 5;              /* 已贴边/角，活动空间被压缩 */
     }
-    var tempo = myMob - opMob;
+    const tempo = myMob - opMob;
     if (tempo > 0) s += Math.min(tempo, 6) * 0.6;
   }
 
@@ -559,15 +577,16 @@ export function evalPos(g, col){
      这类「逼近威胁」不直接兑现，却正是清障、包抄、追猎的组成部分。
      只计目前还吃不到的目标，避免与上面的即时威胁重复；无吃子手数
      逼近 60 时逐步加权，逼 AI 在判和之前收束。 */
-  var pot = 0.10 * (1 + Math.min(g.noCap || 0, 60) / 60);
+  const pot = 0.10 * (1 + Math.min(g.noCap || 0, 60) / 60);
   for (i = 0; i < mine.length; i++){
-    var ap = g.board[mine[i]], want = null;
-    for (var wk = 0; wk < mvs[mine[i]].length; wk++){
-      var wm = mvs[mine[i]][wk];
+    const ap = g.board[mine[i]];
+    let want = null;
+    for (let wk = 0; wk < mvs[mine[i]].length; wk++){
+      const wm = mvs[mine[i]][wk];
       if (wm.kind === "dive" || wm.kind === "thirst" || wm.kind === "self") continue;
-      var nb = NEI[wm.to];
-      for (var wn = 0; wn < nb.length; wn++){
-        var wq = g.board[nb[wn]];
+      const nb = NEI[wm.to];
+      for (let wn = 0; wn < nb.length; wn++){
+        const wq = g.board[nb[wn]];
         if (!wq || !wq.rv || wq.c === col) continue;
         if (kindAt[mine[i]] && kindAt[mine[i]][nb[wn]] === "capture") continue;
         if (!canEat(ap, wq)) continue;
@@ -575,15 +594,15 @@ export function evalPos(g, col){
         want[nb[wn]] = VAL[wq.t];
       }
     }
-    if (want) for (var wj in want) s += pot * want[wj];
+    if (want) for (const wj in want) s += pot * want[wj];
   }
 
   /* 位置：贴河更活；河中是安全屋——河中子不会被吃（只能被压），
      尤其龙进河后，敌方金鸡再也够不到它。敌方堵岸会把河中子冰封，
      这份保护价值随之大打折扣。 */
-  var riverSafe = !ctx.bl || ctx.bl === col;
+  const riverSafe = !ctx.bl || ctx.bl === col;
   for (i = 0; i < mine.length; i++){
-    var c = xy(mine[i]);
+    const c = xy(mine[i]);
     if (c.y === 3 || c.y === 5) s += 1.0;
     if (isRiver(mine[i])){
       if (riverSafe){
@@ -609,18 +628,18 @@ export function evalPos(g, col){
 
   /* 河格压子：按被压棋子的价值计价（河里只有龙/象会被压） */
   for (i = 0; i < RIVER_CELLS.length; i++){
-    var t = g.board[RIVER_CELLS[i]];
+    const t = g.board[RIVER_CELLS[i]];
     if (!t || !t.under) continue;
-    var pv = 0.3 * VAL[t.under.t];
+    const pv = 0.3 * VAL[t.under.t];
     s += t.c === col ? pv : -pv;
   }
 
   /* 堵岸：敌方河中子被冰封、双岸免疫；对方豹能引爆时价值打折 */
   if (ctx.bl){
-    var bl = ctx.bl;
-    var frozen = 0;
+    const bl = ctx.bl;
+    let frozen = 0;
     for (i = 0; i < RIVER_CELLS.length; i++){
-      var rp = g.board[RIVER_CELLS[i]];
+      const rp = g.board[RIVER_CELLS[i]];
       if (!rp) continue;
       if (rp.rv && rp.c !== bl) frozen += VAL[rp.t];
       if (rp.under && rp.under.c !== bl) frozen += VAL[rp.under.t];
@@ -628,11 +647,11 @@ export function evalPos(g, col){
     /* 堵岸的基础价值按局面调整：双岸免疫本身值钱，但它的主要意义
        在于「冻住河中敌子」和「拦住敌方金鸡」。没有这两样时价值打折；
        己方在河边堆子堵住龙的入水口，则还要再扣。 */
-    var bv = 30 + 0.3 * frozen;
+    let bv = 30 + 0.3 * frozen;
     if (bl === col){
       if (opRooster >= 0) bv += 8;
       if (myDragon >= 0 && !isRiver(myDragon) && opRooster >= 0){
-        var freeEntrances = 0;
+        let freeEntrances = 0;
         for (i = 0; i < N; i++){
           if (!touchesRiver(i) || isRiver(i) || g.board[i]) continue;
           freeEntrances++;
@@ -642,7 +661,7 @@ export function evalPos(g, col){
     } else if (myRooster >= 0){
       bv += 8;
     }
-    var ownRiverland = 0;
+    let ownRiverland = 0;
     for (i = 0; i < mine.length; i++){
       if (!isBank(mine[i]) && touchesRiver(mine[i])) ownRiverland++;
     }
@@ -650,7 +669,7 @@ export function evalPos(g, col){
     if (ctx.dive[otherColor(bl)]) bv *= 0.55;   /* 对方随时可以炸掉堵岸 */
     /* 堵岸的另一个用处：把敌方金鸡拦在河界另一侧，己方龙才真正安全 */
     if (bl === col && myDragon >= 0 && opRooster >= 0 && !isRiver(myDragon)){
-      var dy = xy(myDragon).y, ry = xy(opRooster).y;
+      const dy = xy(myDragon).y, ry = xy(opRooster).y;
       if ((dy < 4) !== (ry < 4)) bv += 16;
     }
     s += bl === col ? bv : -bv;
@@ -662,23 +681,24 @@ export function evalPos(g, col){
      这次堵岸就被拆了。这里给「半堵」和「踏岸先机」计价；双方都能
      踏岸时按争抢折价，避免把一手之争估成既成事实。 */
   if (!ctx.bl){
-    var bankAt = {}, bankNum = { r: 0, b: 0 }, bankK;
+    const bankAt = {}, bankNum = { r: 0, b: 0 };
+    let bankK;
     for (bankK = 0; bankK < BANK_CELLS.length; bankK++){
-      var bankP = g.board[BANK_CELLS[bankK]];
+      const bankP = g.board[BANK_CELLS[bankK]];
       if (bankP && bankP.rv){
         bankAt[bankP.c] = BANK_CELLS[bankK];
         bankNum[bankP.c]++;
       }
     }
-    var bankSides = [col, opp], bankLists = [mine, theirs];
+    const bankSides = [col, opp], bankLists = [mine, theirs];
     for (bankK = 0; bankK < 2; bankK++){
-      var bankSide = bankSides[bankK];
+      const bankSide = bankSides[bankK];
       if (bankNum[bankSide] !== 1 || bankNum[otherColor(bankSide)] !== 0) continue;
-      var heldBank = bankAt[bankSide];
-      var openBank = heldBank === BANK_CELLS[0] ? BANK_CELLS[1] : BANK_CELLS[0];
-      var canFill = canStepTo(bankLists[bankK], mvs, openBank, heldBank);
-      var canDeny = canStepTo(bankLists[1 - bankK], mvs, openBank, -1);
-      var bankVal = 10;                          /* 先占一岸 */
+      const heldBank = bankAt[bankSide];
+      const openBank = heldBank === BANK_CELLS[0] ? BANK_CELLS[1] : BANK_CELLS[0];
+      const canFill = canStepTo(bankLists[bankK], mvs, openBank, heldBank);
+      const canDeny = canStepTo(bankLists[1 - bankK], mvs, openBank, -1);
+      let bankVal = 10;                          /* 先占一岸 */
       if (canFill) bankVal += canDeny ? 4 : 9;   /* 另一岸在望；无人争抢则先机在握 */
       else if (canDeny) bankVal -= 4;            /* 对方随时能踏上空岸，先机不牢 */
       s += bankSide === col ? bankVal : -bankVal;
@@ -687,9 +707,9 @@ export function evalPos(g, col){
        必须回防另一岸。只在一方能踏、另一方不能踏时计价；双方都能踏
        就是互相争抢，先机抵消（这正是第一翻选在岸旁的价值）。 */
     if (bankNum.r === 0 && bankNum.b === 0){
-      var mineCanBank = canStepTo(mine, mvs, BANK_CELLS[0], -1) ||
+      const mineCanBank = canStepTo(mine, mvs, BANK_CELLS[0], -1) ||
                         canStepTo(mine, mvs, BANK_CELLS[1], -1);
-      var oppCanBank = canStepTo(theirs, mvs, BANK_CELLS[0], -1) ||
+      const oppCanBank = canStepTo(theirs, mvs, BANK_CELLS[0], -1) ||
                        canStepTo(theirs, mvs, BANK_CELLS[1], -1);
       if (mineCanBank !== oppCanBank) s += mineCanBank ? 4 : -4;
     }
@@ -697,11 +717,11 @@ export function evalPos(g, col){
 
   /* 敌方豹的引爆威胁：己方摆在 Y3–Y5 的子有被一波带走的风险 */
   if (ctx.bl && ctx.dive[opp]){
-    var risk = 0;
+    let risk = 0;
     for (i = 0; i < N; i++){
       p = g.board[i];
       if (!p) continue;
-      var pc = xy(i);
+      const pc = xy(i);
       if (pc.y < 3 || pc.y > 5) continue;
       if (p.rv && p.c === col) risk += VAL[p.t];
       if (p.under && p.under.c === col) risk += VAL[p.under.t];
@@ -714,21 +734,21 @@ export function evalPos(g, col){
      豹的这手「全换」正是翻盘手段，因此落后时权重更高。
      暗棋身份未知，不计入爆区价值。 */
   if (ctx.bl){
-    var zone = { r: 0, b: 0 };
+    const zone = { r: 0, b: 0 };
     for (i = 0; i < N; i++){
       p = g.board[i];
       if (!p) continue;
-      var zc = xy(i);
+      const zc = xy(i);
       if (zc.y < 3 || zc.y > 5) continue;
       if (p.rv) zone[p.c] += VAL[p.t];
       if (p.under && p.under.rv) zone[p.under.c] += VAL[p.under.t];
     }
     if (ctx.dive[col]){
-      var net = zone[opp] - zone[col];
+      const net = zone[opp] - zone[col];
       if (net > 0) s += 0.22 * net * (myMat < opMat ? 1.3 : 1);
     }
     if (ctx.dive[opp]){
-      var onet = zone[col] - zone[opp];
+      const onet = zone[col] - zone[opp];
       if (onet > 0) s -= 0.22 * onet * (opMat < myMat ? 1.3 : 1);
     }
   }
@@ -741,7 +761,8 @@ export function evalPos(g, col){
    可能的身份，每个暗格在这个集合上均匀分布。
    测试摆局不满足整套棋子时返回 null。 */
 function hiddenPool(g){
-  var seen = { r: {}, b: {} }, hidden = 0, i, p;
+  const seen = { r: {}, b: {} };
+  let hidden = 0, i, p;
   for (i = 0; i < N; i++){
     p = g.board[i];
     if (!p) continue;
@@ -749,10 +770,10 @@ function hiddenPool(g){
     if (p.under) seen[p.under.c][p.under.t] = true;   /* 压住的子也是明子 */
   }
   if (!hidden) return [];
-  var pool = [];
+  const pool = [];
   ["r", "b"].forEach(function(c){
-    var caps = (g.caps && g.caps[c]) || [];
-    for (var t = 1; t <= 12; t++){
+    const caps = (g.caps && g.caps[c]) || [];
+    for (let t = 1; t <= 12; t++){
       if (seen[c][t] || caps.indexOf(t) >= 0) continue;
       pool.push({ c: c, t: t });
     }
@@ -762,14 +783,15 @@ function hiddenPool(g){
 /* 翻棋的期望值：对暗格可能出现的每种身份各估一次，按等概率平均。
    注意：这里只使用「可能的身份」，绝不读取该格真实的暗子。 */
 function expectedFlip(g, pi, cell, pool){
-  var col = g.pcolor[pi], sum = 0, i;
+  const col = g.pcolor[pi];
+  let sum = 0, i;
   for (i = 0; i < pool.length; i++){
-    var g2 = cloneG(g);
-    var c = g2.board[cell];
+    const g2 = cloneG(g);
+    const c = g2.board[cell];
     c.c = pool[i].c; c.t = pool[i].t; c.rv = true;
-    var t = terminalScore(g2, pi);
+    const t = terminalScore(g2, pi);
     if (t !== null){ sum += t; continue; }
-    var q = oppBestCapture(g2, 1 - pi, col);
+    const q = oppBestCapture(g2, 1 - pi, col);
     sum += (q !== null) ? q : evalPos(g2, col);
   }
   return sum / pool.length;
@@ -783,19 +805,22 @@ const NODE_BUDGET = 6000;
 const SEARCH_MAX_PIECES = 8;    /* 只在中残局搜索；开局子多，一步评估已足够 */
 
 function hasHidden(g){
-  for (var i = 0; i < N; i++) if (g.board[i] && !g.board[i].rv) return true;
+  for (let i = 0; i < N; i++) if (g.board[i] && !g.board[i].rv) return true;
   return false;
 }
 function pieceCount(g){
-  var n = 0;
-  for (var i = 0; i < N; i++) if (g.board[i]) n++;
+  let n = 0;
+  for (let i = 0; i < N; i++) if (g.board[i]) n++;
   return n;
 }
-/* 在克隆局面上走一步，并同步无吃子计数（与 state.doMove 的语义一致） */
+/* 在克隆局面上走一步，并同步无吃子计数与长捉计数（与 state.doMove 的语义一致） */
 function applyAction(g, a){
-  var ev = applyMove(g, a), ate = false;
-  for (var i = 0; i < ev.length; i++){
-    var t = ev[i].type;
+  const moved = a.kind === "flip" ? null : g.board[a.from];
+  const ev = applyMove(g, a);
+  let ate = false;
+  if (moved) updateChase(g, moved.uid, moved.c);
+  for (let i = 0; i < ev.length; i++){
+    const t = ev[i].type;
     if (t === "eat" || t === "trade" || t === "thirst" || t === "boom"){ ate = true; break; }
   }
   g.noCap = ate ? 0 : (g.noCap || 0) + 1;
@@ -808,25 +833,26 @@ function applyAction(g, a){
    用途：一步估值若只把对手的反吃记成「威胁」，会低估「现在吃一个、
    下一手被白吃一个更大的」这类兑子。 */
 function oppBestCapture(g, oppPi, col){
-  var opp = g.pcolor[oppPi];
-  var bl = blockadeColor(g), best = null, i, k;
+  const opp = g.pcolor[oppPi];
+  const bl = blockadeColor(g);
+  let best = null, i, k;
   for (i = 0; i < N; i++){
-    var p = g.board[i];
+    const p = g.board[i];
     if (!p || !p.rv || p.c !== opp) continue;
-    var ms = movesFor(g, i), km = {};
+    const ms = movesFor(g, i), km = {};
     for (k = 0; k < ms.length; k++) km[ms[k].to] = ms[k].kind;
-    var ctx = { kindAt: {}, mvs: {}, bl: bl, dive: { r: false, b: false } };
+    const ctx = { kindAt: {}, mvs: {}, bl: bl, dive: { r: false, b: false } };
     ctx.kindAt[i] = km;
     for (k = 0; k < ms.length; k++){
-      var a = ms[k];
+      const a = ms[k];
       if (a.kind !== "capture") continue;
-      var q = g.board[a.to];
+      const q = g.board[a.to];
       if (!q || !q.rv || q.c !== col) continue;
       if (attackGain(g, i, a.to, ctx) <= 0) continue;
-      var g2 = cloneG(g);
+      const g2 = cloneG(g);
       applyAction(g2, a);
-      var t = terminalScore(g2, oppPi);
-      var sc = (t !== null) ? -t : evalPos(g2, col);
+      const t = terminalScore(g2, oppPi);
+      const sc = (t !== null) ? -t : evalPos(g2, col);
       if (best === null || sc < best) best = sc;
     }
   }
@@ -834,16 +860,17 @@ function oppBestCapture(g, oppPi, col){
 }
 /* 我方走完一手后的估分：先让对手兑现最赚的一手吃子，再静态估值。 */
 function onePlyScore(g, pi, act, col){
-  var g2 = cloneG(g);
+  const g2 = cloneG(g);
   applyAction(g2, act);
-  var t = terminalScore(g2, pi);
+  const t = terminalScore(g2, pi);
   if (t !== null) return t;
-  var q = oppBestCapture(g2, 1 - pi, col);
+  const q = oppBestCapture(g2, 1 - pi, col);
   return q !== null ? q : evalPos(g2, col);
 }
 /* 着法排序：吃子、压子优先，让 alpha-beta 尽早剪枝 */
 function orderActions(g, acts){
-  var arr = [], i, a, d, p, pr;
+  const arr = [];
+  let i, a, d, p, pr;
   for (i = 0; i < acts.length; i++){
     a = acts[i]; pr = 0;
     if (a.kind === "flip"){ pr = -1; }
@@ -857,7 +884,7 @@ function orderActions(g, acts){
     arr.push({ a: a, pr: pr, i: i });
   }
   arr.sort(function(x, y){ return (y.pr - x.pr) || (x.i - y.i); });
-  var out = [];
+  const out = [];
   for (i = 0; i < arr.length; i++) out.push(arr[i].a);
   return out;
 }
@@ -868,22 +895,28 @@ function drawScore(g, col){ return 1e-3 * evalPos(g, col); }
 /* 极小化极大：返回值始终从 col（AI 一方）的视角计分。 */
 function searchNode(g, pi, depth, col, alpha, beta, nodes){
   nodes.n++;
-  var color = g.pcolor[pi];
-  var opp = otherColor(color);
-  var cnt = counts(g);
+  const color = g.pcolor[pi];
+  const opp = otherColor(color);
+  const cnt = counts(g);
   if (cnt[opp] === 0) return color === col ? WIN : -WIN;
   if (cnt[color] === 0) return color === col ? -WIN : WIN;
-  if (g.noCap >= 60 || deadPosition(g)) return drawScore(g, col);
+  const chaser = chaseLoss(g);
+  if (chaser) return chaser === col ? -WIN : WIN;
+  if (g.noCap >= 60 || deadPosition(g)){
+    const loser = blockadeDrawLoser(g, true);
+    if (loser) return loser === col ? -WIN : WIN;
+    return drawScore(g, col);
+  }
   if (depth <= 0 || nodes.n >= nodes.max) return evalPos(g, col);
-  var acts = allActions(g, pi);
+  const acts = allActions(g, pi);
   if (!acts.length) return color === col ? -WIN : WIN;   /* 困毙 */
-  var maxing = color === col;
-  var best = maxing ? -SEARCH_INF : SEARCH_INF;
-  var ordered = orderActions(g, acts);
-  for (var i = 0; i < ordered.length; i++){
-    var g2 = cloneG(g);
+  const maxing = color === col;
+  let best = maxing ? -SEARCH_INF : SEARCH_INF;
+  const ordered = orderActions(g, acts);
+  for (let i = 0; i < ordered.length; i++){
+    const g2 = cloneG(g);
     applyAction(g2, ordered[i]);
-    var v = searchNode(g2, 1 - pi, depth - 1, col, alpha, beta, nodes);
+    const v = searchNode(g2, 1 - pi, depth - 1, col, alpha, beta, nodes);
     if (maxing){
       if (v > best) best = v;
       if (best > alpha) alpha = best;
@@ -899,12 +932,13 @@ function searchNode(g, pi, depth, col, alpha, beta, nodes){
    根节点每一手都开全窗口：共享 alpha 虽然省节点，却会把「不如当前
    最优」的着法截断成与最优相同的分数，平局随机时就会选中差着。 */
 function rootSearch(g, pi, maxDepth, budget){
-  var col = g.pcolor[pi];
-  var acts = allActions(g, pi);
-  var best = null;
-  for (var d = 1; d <= maxDepth; d++){
-    var nodes = { n: 0, max: budget };
-    var cur = [], complete = true, i, a, g2, sc;
+  const col = g.pcolor[pi];
+  let acts = allActions(g, pi);
+  let best = null;
+  for (let d = 1; d <= maxDepth; d++){
+    const nodes = { n: 0, max: budget };
+    const cur = [];
+    let complete = true, i, a, g2, sc;
     for (i = 0; i < acts.length; i++){
       a = acts[i];
       if (a.kind === "flip"){ complete = false; break; }
@@ -918,8 +952,8 @@ function rootSearch(g, pi, maxDepth, budget){
     best = cur;
     if (nodes.n >= budget) break;
     /* 下一层按本层分数排序：最有希望的着法先搜，剪枝更早生效 */
-    var sorted = cur.slice().sort(function(x, y){ return y.sc - x.sc; });
-    var next = [];
+    const sorted = cur.slice().sort(function(x, y){ return y.sc - x.sc; });
+    const next = [];
     for (i = 0; i < sorted.length; i++) next.push(sorted[i].a);
     acts = next;
   }
@@ -932,7 +966,8 @@ function rootSearch(g, pi, maxDepth, budget){
    视角估分，再按等概率平均。岸旁的落点因此会得到「下一手踏岸」的
    先机权重。全程不读取暗格的真实身份。 */
 function pickOpeningFlip(g, acts){
-  var pool = hiddenPool(g), scored = [], i, k, cell, sum, g2, p, q;
+  const pool = hiddenPool(g), scored = [];
+  let i, k, cell, sum, g2, p, q;
   if (!pool || !pool.length) return pickOpeningFallback(acts);
   for (i = 0; i < acts.length; i++){
     cell = acts[i].i;
@@ -946,18 +981,18 @@ function pickOpeningFlip(g, acts){
     }
     scored.push({ a: acts[i], sc: sum / pool.length });
   }
-  var max = -Infinity;
+  let max = -Infinity;
   for (i = 0; i < scored.length; i++) if (scored[i].sc > max) max = scored[i].sc;
-  var top = [];                       /* 同分落点里随机挑，保留开局变化 */
+  const top = [];                       /* 同分落点里随机挑，保留开局变化 */
   for (i = 0; i < scored.length; i++) if (scored[i].sc >= max - 1e-9) top.push(scored[i].a);
   return top[Math.random() * top.length | 0];
 }
 /* 池子对不上（非标准摆局）时的经验规则：翻中路，后续机动性更好。 */
 function pickOpeningFallback(acts){
-  var best = acts[0], bs = -1e9;
-  for (var i = 0; i < acts.length; i++){
-    var c = xy(acts[i].i);
-    var sc = -Math.abs(c.x - 2.5) * 0.6 - Math.abs(c.y - 4) * 0.25 + Math.random() * 0.6;
+  let best = acts[0], bs = -1e9;
+  for (let i = 0; i < acts.length; i++){
+    const c = xy(acts[i].i);
+    const sc = -Math.abs(c.x - 2.5) * 0.6 - Math.abs(c.y - 4) * 0.25 + Math.random() * 0.6;
     if (sc > bs){ bs = sc; best = acts[i]; }
   }
   return best;
@@ -970,25 +1005,25 @@ function pickOpeningFallback(acts){
      deterministic true 时不做随机取样，稳定返回最优着 */
 export function aiPick(g, pi, opts){
   if (!g || !g.pcolor) return null;
-  var col = g.pcolor[pi];
-  var acts = allActions(g, pi);
+  const col = g.pcolor[pi];
+  const acts = allActions(g, pi);
   if (!acts.length) return null;
   if (!col) return pickOpeningFlip(g, acts);
 
   opts = opts || {};
-  var budget = opts.budget || NODE_BUDGET;
-  var maxDepth = opts.depth || (pieceCount(g) <= 8 ? (g.noCap >= 25 ? 4 : 3) : 2);
-  var pool = hiddenPool(g);
-  var scored = [], i, act, sc;
+  const budget = opts.budget || NODE_BUDGET;
+  const maxDepth = opts.depth || (pieceCount(g) <= 8 ? (g.noCap >= 25 ? 4 : 3) : 2);
+  const pool = hiddenPool(g);
+  let scored = [], i, act, sc;
 
   /* 无吃子手数逼近 60 手：领先方被判和等于输。此时翻开暗棋是打破
      僵局的唯一手段——翻开可能得到己方强子，也可能让挡路的敌子变成
      可吃目标。静态估值看不到这层「未来兑现」，翻棋会一直略输于
      原地腾挪，于是双方在残局里来回兜圈。给接近上限时的翻棋加一笔
      随子力优势放大的紧迫分，让领先方主动去开锁。 */
-  var flipUrgency = 0;
+  let flipUrgency = 0;
   if (g.noCap >= 40){
-    var leadNow = materialLead(g, col);
+    const leadNow = materialLead(g, col);
     if (leadNow > 0){
       flipUrgency = (g.noCap - 40) * Math.min(1, leadNow / 150);
     }
@@ -996,11 +1031,11 @@ export function aiPick(g, pi, opts){
 
   /* 一步制胜就直接兑现：搜索能算出「三步后必胜」，
      但有立即结束的着法时没有理由再兜圈子。 */
-  var instant = [];
+  const instant = [];
   for (i = 0; i < acts.length; i++){
     act = acts[i];
     if (act.kind === "flip") continue;
-    var wg = cloneG(g);
+    const wg = cloneG(g);
     applyAction(wg, act);
     if (terminalScore(wg, pi) === WIN) instant.push(act);
   }
@@ -1008,7 +1043,7 @@ export function aiPick(g, pi, opts){
 
   /* 全盘翻开后的中残局做浅层搜索，把「准备着法」的后续收益算进来。
      只要还有暗子，就退回一步期望估值——搜索树里不能偷看暗子身份。 */
-  var searched = null;
+  let searched = null;
   if (!hasHidden(g) && pieceCount(g) <= SEARCH_MAX_PIECES && maxDepth >= 2){
     searched = rootSearch(g, pi, maxDepth, budget);
   }
@@ -1039,19 +1074,20 @@ export function aiPick(g, pi, opts){
      手里的子力重新获得兑现的机会。
      注意：历史局面记录的是换手后的状态，因此比较前要先翻转 turn；
      否则键里带着行棋方，重复局面永远匹配不上（这一项曾是死代码）。 */
-  var history = opts.history;
-  var repLead = materialLead(g, col);
+  const history = opts.history;
+  const repLead = materialLead(g, col);
   if (history && history.length && repLead > 0){
-    var repGap = g.noCap > 30 ? g.noCap - 30 : 0;
-    var repW = (6 + repGap * 3) * Math.min(1, repLead / 150);
+    const repGap = g.noCap > 30 ? g.noCap - 30 : 0;
+    const repW = (6 + repGap * 3) * Math.min(1, repLead / 150);
     for (i = 0; i < scored.length; i++){
       act = scored[i].a;
       if (act.kind === "flip") continue;
-      var hg = cloneG(g);
+      const hg = cloneG(g);
       applyAction(hg, act);
       hg.turn = 1 - hg.turn;
-      var key = positionKey(hg), hits = 0;
-      for (var h = history.length - 1; h >= 0 && h >= history.length - 16; h--){
+      const key = positionKey(hg);
+      let hits = 0;
+      for (let h = history.length - 1; h >= 0 && h >= history.length - 16; h--){
         if (history[h] === key) hits++;
       }
       if (hits) scored[i].sc -= repW * hits;
@@ -1059,11 +1095,11 @@ export function aiPick(g, pi, opts){
   }
 
   if (!scored.length) return null;
-  var max = -Infinity;
+  let max = -Infinity;
   for (i = 0; i < scored.length; i++) if (scored[i].sc > max) max = scored[i].sc;
 
   if (opts.deterministic){
-    var best = scored[0];
+    let best = scored[0];
     for (i = 1; i < scored.length; i++) if (scored[i].sc > best.sc) best = scored[i];
     return best.a;
   }
@@ -1071,8 +1107,8 @@ export function aiPick(g, pi, opts){
   /* 在「近似最优」里随机挑一个：保留变化，但不再被噪声带偏。
      判和/败势的分数很小（来自 drawScore），此时不给随机余量，
      让位置分真正起到打破平局的作用。 */
-  var margin = (max >= WIN || max < 1) ? 0 : 0.8;
-  var top = [];
+  const margin = (max >= WIN || max < 1) ? 0 : 0.8;
+  const top = [];
   for (i = 0; i < scored.length; i++) if (scored[i].sc >= max - margin) top.push(scored[i].a);
   return top[Math.random() * top.length | 0];
 }

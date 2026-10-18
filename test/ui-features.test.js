@@ -117,6 +117,57 @@ describe("棋子样式", () => {
   });
 });
 
+describe("新规则预警", () => {
+  it("无吃子只剩 10 手时提示和棋倒计时", () => {
+    state.setMode("pvp");
+    state.setGame(mk([[xy2i(1, 1), 1]], [[xy2i(4, 7), 1]], { noCap: 50 }));
+    ui.render();
+    expect(el("hint").textContent).toContain("再走 10 手无吃子将判和");
+    expect(el("hint").classList.contains("warn")).toBe(true);
+
+    state.setGame(mk([[xy2i(1, 1), 1]], [[xy2i(4, 7), 1]], { noCap: 49 }));
+    ui.render();
+    expect(el("hint").classList.contains("warn")).toBe(false);
+  });
+
+  it("堵岸方子力较弱时，横幅提醒和棋将改判负", () => {
+    state.setMode("pvp");
+    state.setGame(mk(
+      [[xy2i(1, 4), 9], [xy2i(4, 4), 7], [xy2i(1, 1), 8]],
+      [[xy2i(4, 7), 4], [xy2i(4, 6), 5]]
+    ));
+    ui.render();
+    expect(el("banner").hidden).toBe(false);
+    expect(el("bannerTxt").innerHTML).toContain("红方子力较弱");
+    expect(el("bannerTxt").innerHTML).toContain("改判红方负");
+  });
+
+  it("长捉到第 9 回合提示即将判负", () => {
+    state.setMode("pvp");
+    state.setGame(mk(
+      [[xy2i(1, 1), 2], [xy2i(4, 7), 10]],
+      [[xy2i(1, 2), 5], [xy2i(4, 6), 9]],
+      { chase: { by: "r", chaserUid: 1, targetUid: 3, rounds: 9, pending: true } }
+    ));
+    ui.render();
+    expect(el("hint").textContent).toContain("红方长捉黑方五虎");
+    expect(el("hint").textContent).toContain("再追 2 回合判负");
+    expect(el("hint").classList.contains("warn")).toBe(true);
+  });
+
+  it("终局告示显示新规则的判负原因", () => {
+    state.setMode("pvp");
+    state.setGame(mk(
+      [[xy2i(1, 1), 2], [xy2i(4, 7), 10]],
+      [[xy2i(1, 2), 5], [xy2i(4, 6), 9]],
+      { result: { kind: "win", winner: "b", why: "红方长捉同一子超过 10 回合，判负", longChase: true } }
+    ));
+    ui.render();
+    expect(el("vWhy").textContent).toContain("长捉");
+    expect(el("turnSub").textContent).toContain("长捉");
+  });
+});
+
 describe("走子播报", () => {
   it("吃子会更新播报文本并发出来自状态层的事件", () => {
     const kinds = [];
