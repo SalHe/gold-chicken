@@ -60,6 +60,72 @@ describe("终局意识", () => {
   });
 });
 
+describe("判负判和规则的估值", () => {
+  const chaseBoard = () => mk(
+    [[xy2i(1, 1), 2], [xy2i(4, 7), 10]],
+    [[xy2i(1, 2), 5], [xy2i(4, 6), 9]]
+  );
+
+  it("长捉接近 11 回合时，追方估值下降、被追方上升", () => {
+    const calm = chaseBoard();
+    const chase = chaseBoard();
+    chase.chase = { by: "r", chaserUid: 1, targetUid: 3, rounds: 9, pending: true };
+
+    expect(ai.evalPos(chase, "r")).toBeLessThan(ai.evalPos(calm, "r") - 200);
+    expect(ai.evalPos(chase, "b")).toBeGreaterThan(ai.evalPos(calm, "b") + 200);
+  });
+
+  it("长捉到第 10 回合时，AI 会停止追击而不是再追一手", () => {
+    const chaser = xy2i(2, 1), target = xy2i(1, 2), guard = xy2i(1, 3);
+    /* 长捉规则要求双方各剩两枚以上，各补一枚远处棋子 */
+    const g = mk(
+      [[chaser, 2], [xy2i(1, 7), 10]],
+      [[target, 5], [guard, DRAGON]],
+      { chase: { by: "r", chaserUid: 1, targetUid: 3, rounds: 10, pending: false } }
+    );
+    const a = ai.aiPick(g, 0, { deterministic: true });
+    expect(a).not.toBe(null);
+
+    /* 走到 (1,1) 或 (2,2) 都会继续威胁同一个目标，黑方一逃就是红方第 11 回合判负；
+       所以 AI 必须换子走或把追子走开，让长捉状态中断。 */
+    const g2 = structuredClone(g);
+    const moved = g2.board[a.from];
+    rules.applyMove(g2, a);
+    rules.updateChase(g2, moved.uid, "r");
+    expect(g2.chase).toBe(null);
+  });
+
+  it("弱堵岸方在判和临近时估值下降，另一方上升", () => {
+    const reds = [[xy2i(1, 4), 9], [xy2i(4, 4), 7], [xy2i(1, 1), 8]];
+    const blacks = [[xy2i(4, 7), 4], [xy2i(4, 6), 5]];
+    const early = mk(reds, blacks);
+    const late = mk(reds, blacks, { noCap: 55 });
+
+    expect(ai.evalPos(late, "r")).toBeLessThan(ai.evalPos(early, "r") - 100);
+    expect(ai.evalPos(late, "b")).toBeGreaterThan(ai.evalPos(early, "b") + 100);
+  });
+
+  it("判和将改判对方负时，AI 反而获得正收益", () => {
+    const reds = [[xy2i(4, 7), 4], [xy2i(4, 6), 5]];
+    const blacks = [[xy2i(1, 4), 9], [xy2i(4, 4), 7], [xy2i(1, 1), 8]];
+    const early = mk(reds, blacks);
+    const late = mk(reds, blacks, { noCap: 55 });
+
+    expect(ai.evalPos(late, "r")).toBeGreaterThan(ai.evalPos(early, "r") + 100);
+    expect(ai.evalPos(late, "b")).toBeLessThan(ai.evalPos(early, "b") - 100);
+  });
+
+  it("有暗棋时不按公开信息判定堵岸改判", () => {
+    const reds = [[xy2i(1, 4), 9], [xy2i(4, 4), 7], [xy2i(1, 1), 8]];
+    const blacks = [[xy2i(4, 7), 4], [xy2i(4, 6), 5], [xy2i(3, 7), 11, false]];
+    const early = mk(reds, blacks);
+    const late = mk(reds, blacks, { noCap: 55 });
+
+    expect(Math.abs(ai.evalPos(late, "r") - ai.evalPos(early, "r"))).toBeLessThan(50);
+    expect(Math.abs(ai.evalPos(late, "b") - ai.evalPos(early, "b"))).toBeLessThan(50);
+  });
+});
+
 describe("交战估值", () => {
   const ctx = (from, to, kind, bl) => ({ kindAt: { [from]: { [to]: kind } }, bl: bl || null });
 

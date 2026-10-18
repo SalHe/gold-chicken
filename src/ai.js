@@ -325,6 +325,19 @@ function soloDragonScore(g, col){
   return (st > 0) === (dragonColor === col) ? WIN : -WIN;
 }
 
+/* 长捉倒计时：同一追子对同一目标完成一次「威胁 → 目标逃走」记一回合，
+   超过 10 回合追方判负。前半程无需紧张，第 6 回合起逐级加码；pending
+   表示追子刚形成威胁，目标下一手若逃走就会再记一回合。 */
+function chasePressure(g, col){
+  const ch = g.chase;
+  if (!ch) return 0;
+  const r = ch.rounds || 0;
+  if (r < 6) return 0;
+  let risk = 10 * Math.pow(3, r - 6);        /* 6:10 7:30 8:90 9:270 10:810 */
+  if (ch.pending && r >= 9) risk *= 1.5;
+  return ch.by === col ? -risk : risk;
+}
+
 /* ---------- 估值 ---------- */
 /* 只依据「已翻开」的信息估值（暗棋身份不参与任何计算） */
 export function evalPos(g, col){
@@ -488,11 +501,22 @@ export function evalPos(g, col){
     }
   }
 
+  /* 判和改判：和棋时仍在堵岸，且堵岸方子力较弱，改判堵岸方负。
+     无吃子手数越高，这个结果越可能兑现——弱堵岸方要尽早拆岸或吃子，
+     另一方则乐于维持到判和。只用公开信息，有暗棋时无法判定。 */
+  const blLoser = g.noCap >= 30 ? blockadeDrawLoser(g, true) : null;
+
   /* 无吃子手数逼近上限：领先方必须主动收束，否则判和等于输。
-     吃子会把 noCap 归零，因此这一项会自然把 AI 推向能兑现的着法。 */
-  if (g.noCap >= 40 && lead > 0){
+     吃子会把 noCap 归零，因此这一项会自然把 AI 推向能兑现的着法。
+     若判和会改判对方负，领先方就不必急着收束，安心把棋局拖到判和。 */
+  if (g.noCap >= 40 && lead > 0 && blLoser !== opp){
     s -= (g.noCap - 40) * (0.35 + Math.min(lead, 300) / 300);
   }
+  if (blLoser){
+    const urgency = Math.min(1, (g.noCap - 30) / 29);   /* 30..59 手 → 0..1 */
+    s += (blLoser === col ? -1 : 1) * (10 + 190 * urgency);
+  }
+  s += chasePressure(g, col);
 
   /* 领先时的简化奖励：子力越少，优势越难被翻盘。
      落后方在同一局面里得到相反的符号，双方对「兑子」的判断一致。 */
@@ -818,7 +842,9 @@ function applyAction(g, a){
   const moved = a.kind === "flip" ? null : g.board[a.from];
   const ev = applyMove(g, a);
   let ate = false;
+  /* 与 state.doFlip / doMove 保持一致：翻棋会重置长捉，走子才更新计数 */
   if (moved) updateChase(g, moved.uid, moved.c);
+  else g.chase = null;
   for (let i = 0; i < ev.length; i++){
     const t = ev[i].type;
     if (t === "eat" || t === "trade" || t === "thirst" || t === "boom"){ ate = true; break; }
@@ -1076,7 +1102,9 @@ export function aiPick(g, pi, opts){
      否则键里带着行棋方，重复局面永远匹配不上（这一项曾是死代码）。 */
   const history = opts.history;
   const repLead = materialLead(g, col);
-  if (history && history.length && repLead > 0){
+  /* 判和会改判对方负时，拖到判和正是领先方的胜利，不该再惩罚重复局面 */
+  const drawWin = blockadeDrawLoser(g, true) === otherColor(col);
+  if (history && history.length && repLead > 0 && !drawWin){
     const repGap = g.noCap > 30 ? g.noCap - 30 : 0;
     const repW = (6 + repGap * 3) * Math.min(1, repLead / 150);
     for (i = 0; i < scored.length; i++){
