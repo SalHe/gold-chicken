@@ -13,14 +13,15 @@ import {
 let aiTimer = null;
 let replayTimer = null;
 
-/* ---------- 偏好设置：速度 / 主题 / 音效 / 震动 ---------- */
+/* ---------- 偏好设置：速度 / 主题 / 棋子样式 / 音效 / 震动 ---------- */
 var PREF = {
   speed: "gold-chicken.speed.v1",
   theme: "gold-chicken.theme.v1",
+  face: "gold-chicken.face.v1",
   sound: "gold-chicken.sound.v1",
   vibe: "gold-chicken.vibe.v1"
 };
-var speed = "mid", theme = "auto", soundOn = false, vibeOn = false;
+var speed = "mid", theme = "auto", face = "text", soundOn = false, vibeOn = false;
 var SPEED_DELAY = { slow: [920, 320], mid: [480, 260], fast: [150, 120] };
 var REPLAY_MS = { slow: 1100, mid: 620, fast: 280 };
 
@@ -76,6 +77,19 @@ function setTheme(v){
   writePref(PREF.theme, v);
   applyTheme();
   syncTheme();
+}
+/* 棋子样式：汉字棋名 / 图案 + 阶数 / 纯图案（无数字，WebP 内联，无外部资源） */
+function syncFace(){
+  document.getElementById("fcText").setAttribute("aria-pressed", face === "text" ? "true" : "false");
+  document.getElementById("fcIcon").setAttribute("aria-pressed", face === "icon" ? "true" : "false");
+  document.getElementById("fcArt").setAttribute("aria-pressed", face === "art" ? "true" : "false");
+  ui.setPieceFace(face);
+}
+function setFace(v){
+  if (v !== "text" && v !== "icon" && v !== "art") return;
+  face = v;
+  writePref(PREF.face, v);
+  syncFace();
 }
 function syncSwitches(){
   var s = document.getElementById("swSound"), v = document.getElementById("swVibe");
@@ -316,9 +330,10 @@ function setMode(m){
 }
 
 function start(){
-  /* 偏好设置：读不到就回到默认（速度中、主题跟随系统、音效/震动关） */
+  /* 偏好设置：读不到就回到默认（速度中、主题跟随系统、棋子文字、音效/震动关） */
   speed = readPref(PREF.speed, ["slow", "mid", "fast"], "mid");
   theme = readPref(PREF.theme, ["auto", "light", "dark"], "auto");
+  face = readPref(PREF.face, ["text", "icon", "art"], "text");
   soundOn = readPref(PREF.sound, null, "0") === "1";
   vibeOn = readPref(PREF.vibe, null, "0") === "1";
   applyTheme();
@@ -339,6 +354,7 @@ function start(){
   syncModeButtons();
   syncSpeed();
   syncTheme();
+  syncFace();
   syncSwitches();
   newGame();
 
@@ -721,6 +737,10 @@ function start(){
   document.getElementById("thAuto").addEventListener("click", function(){ setTheme("auto"); });
   document.getElementById("thLight").addEventListener("click", function(){ setTheme("light"); });
   document.getElementById("thDark").addEventListener("click", function(){ setTheme("dark"); });
+  /* 棋子样式：汉字 / 图案 / 纯图案，选择持久化 */
+  document.getElementById("fcText").addEventListener("click", function(){ setFace("text"); });
+  document.getElementById("fcIcon").addEventListener("click", function(){ setFace("icon"); });
+  document.getElementById("fcArt").addEventListener("click", function(){ setFace("art"); });
   /* 音效 / 震动：默认关闭，开关状态持久化 */
   document.getElementById("swSound").addEventListener("click", function(){ setSound(!soundOn); });
   document.getElementById("swVibe").addEventListener("click", function(){ setVibe(!vibeOn); });

@@ -320,6 +320,33 @@ body{
 .disc.front .num{font-size:calc(var(--cellw) * .155); opacity:.78; letter-spacing:.04em; margin-bottom:1px}
 .disc.front .nm{font-weight:900; font-size:calc(var(--cellw) * .285); letter-spacing:.02em}
 .piece.long .disc.front .nm{font-size:calc(var(--cellw) * .235); letter-spacing:-.01em}
+/* 图案棋面：棋子画直接放在漆盘上（192×192 WebP，构建时内联），
+   不加底色或圆牌。「图案」显示阶数，「纯图案」只显示画；
+   二者与文字棋面互斥，由设置里的「棋子」切换，红/黑仍由漆盘区分。 */
+.disc.front .art{
+  display:none;
+  width:80%; height:80%;
+  margin-top:5%;
+  align-items:center; justify-content:center;
+}
+.disc.front .art-img{
+  display:block; width:94%; height:94%; object-fit:contain;
+  pointer-events:none; user-select:none;
+  filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.4));
+}
+.pieces[data-face="icon"] .disc.front .nm,
+.pieces[data-face="art"] .disc.front .nm{display:none}
+.pieces[data-face="icon"] .disc.front .art,
+.pieces[data-face="art"] .disc.front .art{display:flex}
+/* 图案模式下数字退到圆牌上方的漆边里，不再和棋名抢中间 */
+.pieces[data-face="icon"] .disc.front .num{
+  position:absolute; z-index:3; top:3.5%; left:50%; transform:translateX(-50%);
+  margin:0; opacity:1; font-weight:600; font-size:calc(var(--cellw) * .17);
+  color:#f6dfa9; text-shadow:0 1px 2px rgba(0,0,0,.75);
+}
+/* 纯图案：没有阶数要避让，棋子画居中并放大占满漆盘 */
+.pieces[data-face="art"] .disc.front .num{display:none}
+.pieces[data-face="art"] .disc.front .art{width:88%; height:88%; margin-top:0}
 .disc.back{
   transform:rotateY(180deg);
   background:radial-gradient(circle at 36% 28%, var(--back-bg), var(--back-bg2) 68%, #0a1a19);
@@ -371,7 +398,7 @@ body{
 }
 /* 待确认的自残目标：骷髅头闪烁 */
 .disc.front .skull{
-  display:none; position:absolute; left:50%; top:50%;
+  display:none; position:absolute; z-index:4; left:50%; top:50%;
   width:76%; height:76%; transform:translate(-50%,-50%);
   pointer-events:none; filter:drop-shadow(0 1px 5px rgba(0,0,0,.55));
 }
@@ -381,7 +408,8 @@ body{
   to  {opacity:1;   transform:translate(-50%,-50%) scale(1)}
 }
 .piece.armed .disc.front .num,
-.piece.armed .disc.front .nm{opacity:.14}
+.piece.armed .disc.front .nm,
+.piece.armed .disc.front .art{opacity:.14}
 @media (prefers-reduced-motion: reduce){
   .piece.armed .disc.front .skull{animation:none; opacity:1}
 }

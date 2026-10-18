@@ -7,9 +7,17 @@ import {
   getAiPaused, isReplaying, getReplayInfo, getReplayLog
 } from "./state.js";
 import { listDemos } from "./demo.js";
+import { pieceArtSrc } from "./piece-art.js";
 
 let gridEl = null, pieceEl = null, stackEl = null;
 let cellEls = [], cache = new Map();
+/* 棋面模式：text = 汉字，icon = 图案 + 阶数，art = 纯图案（不显示数字）；
+   由设置里的「棋子」切换。图案为压缩后的 WebP，构建时内联。 */
+let pieceFace = "text";
+export function setPieceFace(mode){
+  pieceFace = mode === "icon" || mode === "art" ? mode : "text";
+  if (pieceEl) pieceEl.dataset.face = pieceFace;
+}
 /* 键盘焦点所在的格（roving tabindex）：整张棋盘只占一个 Tab 位 */
 let focusIdx = 0;
 /* 被用户关掉的结束界面。记结果对象本身而不是布尔值：
@@ -23,6 +31,7 @@ export function toggleLogFullMode(){ logFullMode = !logFullMode; return logFullM
 export function initUi(){
   gridEl = document.getElementById("grid");
   pieceEl = document.getElementById("pieces");
+  if (pieceEl) pieceEl.dataset.face = pieceFace;
   stackEl = document.getElementById("stack");
   stackEl.addEventListener("click", function(e){
     var t = e.target.closest("[data-i]");
@@ -89,6 +98,9 @@ export function makePieceEl(p){
   el.innerHTML =
     '<div class="inner">' +
       '<div class="disc front"><span class="num"></span><span class="nm"></span>' +
+        '<span class="art" aria-hidden="true">' +
+          '<img class="art-img" src="' + pieceArtSrc(p.t) + '" alt="" draggable="false">' +
+        '</span>' +
         '<svg class="skull" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
           '<path d="M12 1.8C7.3 1.8 3.5 5.4 3.5 9.9c0 2.6 1.3 4.6 3.2 5.9v2.4c0 .9.7 1.6 1.6 1.6h.8v2.3c0 .6.5 1.1 1.1 1.1h3.6c.6 0 1.1-.5 1.1-1.1v-2.3h.8c.9 0 1.6-.7 1.6-1.6v-2.4c1.9-1.3 3.2-3.3 3.2-5.9 0-4.5-3.8-8.1-8.5-8.1z" ' +
             'fill="#f7f1e6" stroke="#171310" stroke-width="1.1" stroke-linejoin="round"/>' +

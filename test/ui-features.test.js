@@ -3,6 +3,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import * as state from "../src/state.js";
 import * as ui from "../src/ui.js";
 import { movesFor } from "../src/rules.js";
+import { pieceArtSrc } from "../src/piece-art.js";
 import { installDomStub } from "./helpers/dom-stub.js";
 import { mk, xy2i } from "./helpers/factory.js";
 
@@ -77,6 +78,42 @@ describe("终局悔棋", () => {
     ui.render();
     expect(state.getGame().result).toBe(null);
     expect(el("victory").hidden).toBe(true);
+  });
+});
+
+describe("棋子样式", () => {
+  it("可在文字、图案与纯图案之间切换，非法值回落到文字", () => {
+    state.setGame(mk([[xy2i(1, 1), 4]], [[xy2i(4, 7), 5]]));
+    ui.setPieceFace("icon");
+    ui.render();
+    expect(el("pieces").dataset.face).toBe("icon");
+    const piece = pieceAt(xy2i(1, 1));
+    expect(piece.className).toContain("piece");
+    expect(piece.innerHTML).toContain('class="art-img"');
+    expect(piece.innerHTML).toContain('src="');
+
+    ui.setPieceFace("art");
+    ui.render();
+    expect(el("pieces").dataset.face).toBe("art");
+    expect(pieceAt(xy2i(1, 1)).innerHTML).toContain('class="art-img"');
+
+    ui.setPieceFace("text");
+    expect(el("pieces").dataset.face).toBe("text");
+    ui.setPieceFace("bogus");
+    expect(el("pieces").dataset.face).toBe("text");
+  });
+
+  it("十二阶各有一张棋子画，越界不画", () => {
+    const seen = new Set();
+    for (let t = 1; t <= 12; t++){
+      const src = pieceArtSrc(t);
+      expect(src.length).toBeGreaterThan(0);
+      expect(src).toContain(".webp");
+      seen.add(src);
+    }
+    expect(seen.size).toBe(12);
+    expect(pieceArtSrc(0)).toBe("");
+    expect(pieceArtSrc(13)).toBe("");
   });
 });
 

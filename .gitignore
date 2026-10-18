@@ -2,3 +2,6 @@ node_modules/
 
 # 构建产物：由 `npm run build` 从 src/ 生成，不入库
 /index.html
+
+# 棋子原图（2048² PNG，约 40MB）；构建使用 src/art/ 里压缩后的 WebP
+/assets/

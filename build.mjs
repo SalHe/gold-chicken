@@ -8,7 +8,8 @@ const r = await build({
   bundle: true,
   format: "iife",
   minify: false,
-  write: false
+  write: false,
+  loader: { ".webp": "dataurl" }   // 棋子画内联成 data URI，产物仍是单文件
 });
 let js = r.outputFiles[0].text;
 js = js.replace(/<\/script>/gi, "<\\/script>");   // 防止内联 JS 里的字符串提前闭合 <script>
