@@ -290,6 +290,42 @@ function applyReplayAction(a, step){
   rememberPos();
 }
 
+/* 回放模式下的完整行棋记录：从起点把整段走子序列预演一遍，
+   返回起点日志（base）与每一步的日志行（moves，含尚未走到的）。
+   结果缓存在 replay 上，只算一次；UI 用它显示「全程」记录并支持向前跳转。 */
+export function getReplayLog(){
+  if (!replay) return null;
+  if (replay.fullLog) return replay.fullLog;
+  var o;
+  try{ o = JSON.parse(replay.start); }catch(e){ return null; }
+  if (!o || !o.g || !o.g.board) return null;
+  var sim = o.g, base = sim.log.slice(), moves = [];
+  sim.log = [];
+  var prevGame = game;
+  game = sim;
+  try{
+    for (var i = 0; i < replay.list.length; i++){
+      var a = replay.list[i];
+      /* 与 replayStep/replayGoto 一致：记录不合法就停在这里 */
+      var acts = allActions(sim, sim.turn), ok = false;
+      for (var k = 0; k < acts.length; k++){
+        if (actionMatches(acts[k], a)){ ok = true; break; }
+      }
+      if (!ok) break;
+      try{
+        if (a.kind === "flip") doFlip(a.i, sim.turn);
+        else doMove(a, sim.turn);
+      }catch(e){ break; }
+      /* 每个着法恰好追加一条日志；日志截断时最新一条仍在末尾 */
+      var line = sim.log[sim.log.length - 1];
+      if (line) moves.push({ step: i + 1, c: line.c, h: line.h });
+      sim.turn = 1 - sim.turn;
+    }
+  }finally{ game = prevGame; }
+  replay.fullLog = { base: base, moves: moves };
+  return replay.fullLog;
+}
+
 /* 走一步回放。返回 false 表示已播完或记录不合法（不合法时直接退出回放）。 */
 export function replayStep(){
   if (!replay || replay.idx >= replay.list.length) return false;

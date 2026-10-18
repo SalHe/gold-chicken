@@ -475,11 +475,23 @@ body{
 .log div.s{border-left-color:var(--gold); color:var(--muted); font-style:normal}
 .log div.seek{cursor:pointer}
 .log div.seek:hover{background:var(--gold-soft)}
+/* 全程记录：未走到的记录压暗，当前手用金色标出；都可点击跳转 */
+.log div.future{opacity:.42; cursor:pointer}
+.log div.future:hover{opacity:.85; background:var(--gold-soft)}
+.log div.cur{background:var(--gold-soft); border-left-color:var(--gold)}
 .log .k{font-weight:700}
 h2.t{
+  display:flex; align-items:center; gap:8px;
   font-family:var(--serif); font-size:12px; letter-spacing:.22em; color:var(--muted);
   margin:0 0 6px; font-weight:700; text-transform:uppercase;
 }
+.logmode{
+  margin-left:auto; font:inherit; font-size:10.5px; font-weight:700; letter-spacing:.08em;
+  text-transform:none; padding:1px 8px; border-radius:999px; cursor:pointer;
+  border:1px solid var(--line-strong); background:var(--surface-2); color:var(--muted);
+}
+.logmode:hover{color:var(--fg); border-color:var(--gold); background:var(--gold-soft)}
+.logmode[aria-pressed="true"]{color:var(--gold); border-color:var(--gold); background:var(--gold-soft)}
 .btns{display:flex; gap:8px; flex-wrap:wrap}
 button.act{
   font:inherit; font-size:13px; padding:8px 15px; border-radius:8px; cursor:pointer;

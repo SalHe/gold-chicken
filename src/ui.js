@@ -4,7 +4,7 @@ import { xy, terrain, blockadeColor, isBank, pname, counts, movesFor } from "./r
 import {
   getGame, getSel, setSel, getCurMoves, setCurMoves, getArmed, setArmed,
   getMode, getUndoStack, getActions, findMove, pendingMove, blastZone, commit, isAITurn,
-  getAiPaused, isReplaying, getReplayInfo
+  getAiPaused, isReplaying, getReplayInfo, getReplayLog
 } from "./state.js";
 import { listDemos } from "./demo.js";
 
@@ -13,6 +13,9 @@ let cellEls = [], cache = new Map();
 /* 被用户关掉的结束界面。记结果对象本身而不是布尔值：
    新一局的结果是另一个对象，界面会重新弹出。 */
 let dismissedResult = null;
+/* 回放时的行棋记录模式：false = 只列已走过的（原有行为），true = 列整段 Demo */
+let logFullMode = false;
+export function toggleLogFullMode(){ logFullMode = !logFullMode; return logFullMode; }
 
 /* 懒解析 DOM：import ui.js 时不碰 document，测试可自由控制导入顺序 */
 export function initUi(){
@@ -339,14 +342,41 @@ export function renderPanel(){
 
   var lg = document.getElementById("log");
   var replaying = isReplaying();
-  lg.innerHTML = g.log.map(function(l){
-    var seek = replaying && l.step;
-    var cls = l.c + (seek ? " seek" : "");
-    var attr = seek ? ' data-step="' + l.step + '" title="回到第 ' + l.step + ' 手"' : "";
-    return '<div class="' + cls + '"' + attr + ">" + l.h + "</div>";
-  }).join("");
-  /* 行棋记录总是停在最新的一步 */
-  lg.scrollTop = lg.scrollHeight;
+  /* 「全程」开关只在回放时出现；离开回放自动回到只列已走的模式 */
+  var logBtn = document.getElementById("logModeBtn");
+  if (!replaying) logFullMode = false;
+  logBtn.hidden = !replaying;
+  logBtn.setAttribute("aria-pressed", logFullMode ? "true" : "false");
+  var full = (replaying && logFullMode) ? getReplayLog() : null;
+  if (full){
+    var walked = getReplayInfo() ? getReplayInfo().idx : 0;
+    var rows = full.base.map(function(l){
+      return '<div class="' + l.c + '">' + l.h + "</div>";
+    });
+    full.moves.forEach(function(l){
+      var cls = l.c + (l.step === walked ? " seek cur" : (l.step < walked ? " seek" : " future"));
+      rows.push('<div class="' + cls + '" data-step="' + l.step + '" title="' +
+        (l.step > walked ? "跳到第 " : "回到第 ") + l.step + ' 手">' + l.h + "</div>");
+    });
+    lg.innerHTML = rows.join("");
+    /* 让当前手停在可视区内；停在开局时回到顶部 */
+    if (!walked) lg.scrollTop = 0;
+    else {
+      var curRow = null;
+      try{ curRow = lg.querySelector('[data-step="' + walked + '"]'); }catch(e){}
+      if (curRow && curRow.scrollIntoView) curRow.scrollIntoView({ block: "nearest" });
+      else lg.scrollTop = lg.scrollHeight;
+    }
+  } else {
+    lg.innerHTML = g.log.map(function(l){
+      var seek = replaying && l.step;
+      var cls = l.c + (seek ? " seek" : "");
+      var attr = seek ? ' data-step="' + l.step + '" title="回到第 ' + l.step + ' 手"' : "";
+      return '<div class="' + cls + '"' + attr + ">" + l.h + "</div>";
+    }).join("");
+    /* 行棋记录总是停在最新的一步 */
+    lg.scrollTop = lg.scrollHeight;
+  }
 
   var undoDisabled = getUndoStack().length === 0 || !!g.result || isReplaying() ||
     (mode === "aiai" && !getAiPaused());

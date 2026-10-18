@@ -190,6 +190,25 @@ describe("回放跳转与接手", () => {
     expect(state.snapshot()).not.toContain('"step"');
   });
 
+  it("全程记录预演整段走子序列，未走的也带文本", () => {
+    var o = setup();
+    expect(state.beginReplay(o.start, o.acts)).toBe(true);
+
+    var full = state.getReplayLog();
+    expect(full.base).toEqual([]);
+    expect(full.moves.map(m => m.step)).toEqual([1, 2, 3]);
+    expect(full.moves.every(m => m.h && m.c)).toBe(true);
+
+    /* 预演出的文本与真正走到那一步时的日志逐条一致 */
+    expect(state.replayGoto(3)).toBe(true);
+    var walked = state.getGame().log.filter(l => l.step);
+    expect(walked.map(l => l.h)).toEqual(full.moves.map(m => m.h));
+    expect(walked.map(l => l.c)).toEqual(full.moves.map(m => m.c));
+
+    /* 同一段回放重复取用缓存，不重新预演 */
+    expect(state.getReplayLog()).toBe(full);
+  });
+
   it("可以把当前回放局面变成一局可继续的对局", () => {
     var o = setup();
     expect(state.beginReplay(o.start, o.acts)).toBe(true);

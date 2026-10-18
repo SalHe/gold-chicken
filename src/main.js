@@ -449,6 +449,12 @@ function start(){
     if (!isReplaying() || !info || info.idx <= 0) return;
     seekReplay(info.idx - 1);
   });
+  /* 回放：行棋记录在「已走」与「全程」之间切换；全程模式下可直接点未走的记录向前跳 */
+  document.getElementById("logModeBtn").addEventListener("click", function(){
+    if (!isReplaying()) return;
+    ui.toggleLogFullMode();
+    ui.renderPanel();
+  });
   /* 回放中点击行棋记录：跳到那一手之后的局面 */
   document.getElementById("log").addEventListener("click", function(e){
     if (!isReplaying()) return;
