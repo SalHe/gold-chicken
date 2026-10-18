@@ -123,6 +123,19 @@ export function movesFor(g, i){
     }
   }
 
+  /* 己方堵岸时，岸上的象可以直接跃入河中，两格河任选（正对的一格由
+     下面的四邻循环处理，这里只补另一格），落点照常「压」子。
+     象一离开岸，堵岸也随之解除。 */
+  if (p.t === ELEPHANT && isBank(i) && bl === p.c){
+    for (k = 0; k < N; k++){
+      if (!isRiver(k)) continue;
+      var bv = xy(k);
+      if (Math.abs(bv.x - c.x) + Math.abs(bv.y - c.y) === 1) continue;
+      lc = riverCheck(g, p, k);
+      if (lc.ok) out.push({ from: i, to: k, kind: lc.kind });
+    }
+  }
+
   /* 龙、象可以斜着下河：站在河边的四格陆地上时，两格河都能进。
      正对的那一格由下面的四邻循环处理，这里只补斜角，避免重复着法。 */
   if ((p.t === DRAGON || p.t === ELEPHANT) && !isBank(i) && touchesRiver(i)){

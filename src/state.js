@@ -1,5 +1,5 @@
 /* 活棋状态 + 回合流转 + 访问器。不碰 DOM；靠 change hook 通知渲染层。 */
-import { N } from "./constants.js";
+import { N, NAME } from "./constants.js";
 import {
   xy, isRiver, isBank, shuffle, posName, pname,
   counts, deadPosition, allActions, applyMove, positionKey
@@ -17,9 +17,17 @@ let baseSnapshot = null, actions = [];
 let posHistory = [];
 /* 回放态：replay = { list, idx }；savedState 记住回放前的对局，退出时原样恢复 */
 let replay = null, savedState = null;
+/* 最近一手的纯文本描述（不含颜色前缀），供界面做走子播报 */
+let lastNote = "";
+/* 行棋音效/震动的回调；回放与测试中不触发 */
+let feedback = null;
 
 function notify(reset){ if (changed) changed(reset); }
 function rememberPos(){ if (game) posHistory.push(positionKey(game)); }
+function emit(kind){
+  if (!feedback || replay || !kind) return;
+  try{ feedback(kind); }catch(e){}
+}
 
 /* ---------- 访问器（setGame/setSel 等供测试注入摆局与点击态） ---------- */
 export function getGame(){ return game; }
@@ -50,6 +58,8 @@ export function getPositionHistory(){ return posHistory.slice(); }
 export function isReplaying(){ return !!replay; }
 export function getReplayInfo(){ return replay ? { idx: replay.idx, total: replay.list.length } : null; }
 export function setChanged(fn){ changed = fn; }
+export function setFeedback(fn){ feedback = fn; }
+export function getLastNote(){ return lastNote; }
 
 export function newGame(){
   var pieces = [], c, t;
@@ -116,6 +126,7 @@ export function doFlip(i, pi){
     assigned = true;
   }
   game.pulse = i;
+  lastNote = "翻开 " + posName(i) + "：" + pname(p);
   if (assigned){
     say("s", "先手翻开 " + posName(i) + "：<span class='k'>" + (p.c === "r" ? "红" : "黑") + "方 " + pname(p) +
              "</span> —— 先手执" + (p.c === "r" ? "红" : "黑") + "，后手执" + (p.c === "r" ? "黑" : "红") + "。");
@@ -123,6 +134,7 @@ export function doFlip(i, pi){
     say(p.c, (p.c === "r" ? "红" : "黑") + "方 翻开 " + posName(i) + "：<span class='k'>" + pname(p) + "</span>");
   }
   game.last = { from: -1, to: i };
+  emit("flip");
   return false;
 }
 export function doMove(a, pi){
@@ -130,6 +142,7 @@ export function doMove(a, pi){
   var q = game.board[a.to];
   var col = p.c === "r" ? "红" : "黑";
   var line = col + "方 " + pname(p) + " " + posName(a.from) + "→" + posName(a.to);
+  var note = pname(p) + " " + posName(a.from) + "→" + posName(a.to);
   var ate = false;
   var traded = !!(q && q.t === p.t && a.kind !== "press");
 
@@ -137,12 +150,15 @@ export function doMove(a, pi){
     if (a.kind === "press"){
       /* 河格压子：不杀不兑，被压的子留在下面 */
       line += "，<span class='k'>压住</span> " + (q.c === "r" ? "红方 " : "黑方 ") + pname(q);
+      note += " 压 " + pname(q);
     } else {
       ate = true;
       var whose = q.c === p.c ? "己方 " : (q.c === "r" ? "红方 " : "黑方 ");
       line += traded
         ? "，与 " + whose + pname(q) + " <span class='k'>邀兑同归于尽</span>"
         : "，吃掉 " + whose + pname(q);
+      note += (q.c === p.c ? " 吃己方 " : " 吃 ") + pname(q);
+      if (traded) note = pname(p) + " " + posName(a.from) + "→" + posName(a.to) + " 与 " + pname(q) + " 邀兑";
     }
   }
   var ev = applyMove(game, a);
@@ -150,6 +166,7 @@ export function doMove(a, pi){
   if (a.kind === "thirst"){
     ate = true;
     line += "，<span class='k'>上岸渴死</span>";
+    note += " · 上岸渴死";
     game.pulse = a.to;
   } else if (a.kind === "dive"){
     var names = [];
@@ -159,10 +176,14 @@ export function doMove(a, pi){
     }
     line = col + "方 " + pname(p) + " " + posName(a.from) + "→" + posName(a.to) +
            "，<span class='k'>下河引爆</span>！Y3–Y5 尽毁：" + (names.length ? names.join("、") : "空");
+    note = pname(p) + " " + posName(a.from) + "→" + posName(a.to) + " · 下河引爆";
     ate = true;
   }
   game.last = { from: a.from, to: a.to };
+  lastNote = note;
   say(p.c, line);
+  emit(a.kind === "dive" ? "dive" : a.kind === "thirst" ? "thirst"
+    : q ? (a.kind === "press" ? "press" : (traded ? "trade" : "capture")) : "move");
 
   /* 计数：无吃子手数 */
   if (ate) game.noCap = 0; else game.noCap++;
@@ -190,12 +211,18 @@ export function endTurn(){
   checkResult();
   sel = -1; curMoves = []; armed = -1;
   notify(false);
+  emit(game.result ? (game.result.kind === "win" ? "win" : "draw") : null);
 }
 export function commit(a){
   undoStack.push(snapshot());
   actions.push(a);
   if (a.kind === "flip") doFlip(a.i, game.turn);
   else doMove(a, game.turn);
+  /* 本手序号：非枚举属性，不进快照；行棋记录用它编号 */
+  var top = game.log[game.log.length - 1];
+  if (top){
+    Object.defineProperty(top, "no", { value: actions.length, enumerable: false, configurable: true });
+  }
   endTurn();
   rememberPos();
 }

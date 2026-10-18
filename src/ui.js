@@ -1,5 +1,5 @@
 /* DOM 渲染 + 点击交互。import state 访问器；import 时不碰 document。 */
-import { N, NAME, NUM } from "./constants.js";
+import { W, H, N, NAME, NUM } from "./constants.js";
 import { xy, terrain, blockadeColor, isBank, pname, counts, movesFor } from "./rules.js";
 import {
   getGame, getSel, setSel, getCurMoves, setCurMoves, getArmed, setArmed,
@@ -10,6 +10,8 @@ import { listDemos } from "./demo.js";
 
 let gridEl = null, pieceEl = null, stackEl = null;
 let cellEls = [], cache = new Map();
+/* 键盘焦点所在的格（roving tabindex）：整张棋盘只占一个 Tab 位 */
+let focusIdx = 0;
 /* 被用户关掉的结束界面。记结果对象本身而不是布尔值：
    新一局的结果是另一个对象，界面会重新弹出。 */
 let dismissedResult = null;
@@ -25,7 +27,34 @@ export function initUi(){
   stackEl.addEventListener("click", function(e){
     var t = e.target.closest("[data-i]");
     if (!t) return;
-    onCell(parseInt(t.dataset.i, 10));
+    var i = parseInt(t.dataset.i, 10);
+    if (isFinite(i)) focusIdx = i;
+    onCell(i);
+  });
+  /* 键盘：方向键在棋盘上移动焦点，回车/空格落子或翻棋 */
+  stackEl.addEventListener("keydown", function(e){
+    var t = e.target && e.target.closest ? e.target.closest("[data-i]") : null;
+    if (!t) return;
+    var i = parseInt(t.dataset.i, 10);
+    if (!isFinite(i)) return;
+    if (e.key === "Enter" || e.key === " " || e.key === "Spacebar"){
+      e.preventDefault();
+      onCell(i);
+      return;
+    }
+    var c = xy(i), nx = c.x, ny = c.y;
+    if (e.key === "ArrowLeft") nx--;
+    else if (e.key === "ArrowRight") nx++;
+    else if (e.key === "ArrowUp") ny--;
+    else if (e.key === "ArrowDown") ny++;
+    else return;
+    e.preventDefault();
+    nx = Math.max(1, Math.min(W, nx));
+    ny = Math.max(1, Math.min(H, ny));
+    var n = (ny - 1) * W + (nx - 1);
+    focusIdx = n;
+    for (var k = 0; k < cellEls.length; k++) cellEls[k].tabIndex = k === n ? 0 : -1;
+    if (cellEls[n] && cellEls[n].focus) cellEls[n].focus();
   });
 }
 
@@ -37,6 +66,8 @@ export function buildGrid(){
     var d = document.createElement("div");
     d.className = "cell " + (t === "river" ? "river" : t === "bank" ? "bank" : "land-b");
     d.dataset.i = i;
+    d.setAttribute("role", "button");
+    d.tabIndex = i === focusIdx ? 0 : -1;
     if (t === "bank"){
       var l = document.createElement("span");
       l.className = "lbl";
@@ -95,7 +126,8 @@ export function syncPieces(){
       else if (p.under) el.classList.add("pressing");
       pieceEl.appendChild(el);
       cache.set(p.uid, el);
-      return;
+      /* 不 return：继续走下面的状态类，保证清空缓存后的首次渲染
+         也能正确标出选中、可吃、邀兑等状态 */
     }
     el.dataset.i = i;
     el.style.setProperty("--px", c.x - 1);
@@ -106,18 +138,24 @@ export function syncPieces(){
     el.classList.toggle("pressed", pressed);
     el.classList.toggle("pressing", !pressed && !!p.under);
     if (pressed){
-      el.classList.remove("sel", "cap", "selfcap", "armed", "doomed");
+      el.classList.remove("sel", "cap", "trade", "selfcap", "armed", "doomed");
       return;
     }
     el.classList.toggle("sel", i === sel);
     el.classList.toggle("last", !!(g.last && g.last.to === i));
-    var isCap = false, isSelf = false;
+    /* 同阶敌子相吃是「邀兑」，与普通吃子用不同的记号区分：
+       吃子画红色危险圈，邀兑画中性虚线 + 「兑」字角标。 */
+    var isCap = false, isSelf = false, isTrade = false;
     curMoves.forEach(function(m){
       if (m.to !== i) return;
-      if (m.kind === "capture") isCap = true;
-      else if (m.kind === "self") isSelf = true;
+      if (m.kind === "capture"){
+        var from = g.board[m.from], to = g.board[i];
+        if (from && to && from.t === to.t) isTrade = true;
+        else isCap = true;
+      } else if (m.kind === "self") isSelf = true;
     });
     el.classList.toggle("cap", isCap);
+    el.classList.toggle("trade", isTrade);
     el.classList.toggle("selfcap", isSelf);
     /* 待确认的危险着法：自残画在被吃的那枚子上；引爆则画在豹自己身上，
        同时把 Y3–Y5 的全体标成将毁。 */
@@ -145,6 +183,42 @@ export function syncPieces(){
   });
   g.pulse = null;
 }
+/* 屏幕阅读器用的格子描述：地形 + 棋子 + 选中/可落子提示。
+   暗棋只报「暗棋」，不泄露尚未翻开的颜色与身份。 */
+function pieceLabel(p){
+  if (!p) return "";
+  if (!p.rv) return "暗棋";
+  return (p.c === "r" ? "红方" : "黑方") + pname(p);
+}
+function moveLabel(g, m, i){
+  if (m.kind === "capture"){
+    var from = g.board[m.from], to = g.board[i];
+    return from && to && from.t === to.t ? "，可邀兑" : "，可吃";
+  }
+  if (m.kind === "self") return "，可吃己方，需确认";
+  if (m.kind === "press") return "，可压住";
+  if (m.kind === "thirst") return "，上岸会渴死";
+  if (m.kind === "dive") return "，引爆，需确认";
+  return "，可走";
+}
+function cellAria(g, i, curMoves){
+  var c = xy(i), t = terrain(c.x, c.y);
+  var pos = "(" + c.x + "," + c.y + ")";
+  var label = t === "river" ? "河 " + pos : t === "bank" ? "岸 " + pos : pos;
+  var p = g.board[i];
+  if (p){
+    label += "，" + pieceLabel(p);
+    if (p.under) label += "，压着 " + pieceLabel(p.under);
+  } else if (t === "land"){
+    label += "，空";
+  }
+  if (i === getSel()) label += "，已选中";
+  for (var k = 0; k < curMoves.length; k++){
+    if (curMoves[k].to === i){ label += moveLabel(g, curMoves[k], i); break; }
+  }
+  return label;
+}
+
 export function renderCells(){
   var g = getGame();
   var curMoves = getCurMoves();
@@ -168,6 +242,8 @@ export function renderCells(){
       if (p && p.rv && p.c === bl) cls += " blockade";
     }
     d.className = cls;
+    d.tabIndex = i === focusIdx ? 0 : -1;
+    d.setAttribute("aria-label", cellAria(g, i, curMoves));
 
     var mk = d.querySelector(".mk");
     if (mv[i] === "mv boom"){
@@ -245,6 +321,8 @@ export function renderVictory(){
   var hasDemo = getActions().length > 0;
   document.getElementById("vReplay").disabled = !hasDemo;
   document.getElementById("vCopyDemo").disabled = !hasDemo || isReplaying();
+  /* 终局也能悔棋：撤回决胜的一手，结束告示随之收起，棋局继续 */
+  document.getElementById("vUndo").disabled = isReplaying() || getUndoStack().length === 0;
   v.hidden = false;
 }
 export function renderPanel(){
@@ -356,7 +434,8 @@ export function renderPanel(){
     full.moves.forEach(function(l){
       var cls = l.c + (l.step === walked ? " seek cur" : (l.step < walked ? " seek" : " future"));
       rows.push('<div class="' + cls + '" data-step="' + l.step + '" title="' +
-        (l.step > walked ? "跳到第 " : "回到第 ") + l.step + ' 手">' + l.h + "</div>");
+        (l.step > walked ? "跳到第 " : "回到第 ") + l.step + ' 手">' +
+        '<span class="no">' + l.step + '.</span>' + l.h + "</div>");
     });
     lg.innerHTML = rows.join("");
     /* 让当前手停在可视区内；停在开局时回到顶部 */
@@ -368,11 +447,21 @@ export function renderPanel(){
       else lg.scrollTop = lg.scrollHeight;
     }
   } else {
-    lg.innerHTML = g.log.map(function(l){
+    /* 手数：回放用记录上的 step；活棋局用 commit 打上的 no。
+       每条着法恰好生成一条日志，只有开头那条「开局」系统消息不是着法；
+       旧快照里的非枚举序号会随 JSON 丢失，退回按日志顺序计数。 */
+    var acted = 0;
+    lg.innerHTML = g.log.map(function(l, idx){
+      /* 有 step/no 的一定是着法；只有在两者都丢失时，才靠「首条系统消息」
+         这个特征认出开局说明（普通对局里它总是第一条）。 */
+      var opening = idx === 0 && l.c === "s" && !l.step && !l.no;
+      if (!opening) acted++;
+      var n = l.step || l.no || acted;
       var seek = replaying && l.step;
       var cls = l.c + (seek ? " seek" : "");
       var attr = seek ? ' data-step="' + l.step + '" title="回到第 ' + l.step + ' 手"' : "";
-      return '<div class="' + cls + '"' + attr + ">" + l.h + "</div>";
+      var num = opening ? "" : '<span class="no">' + n + ".</span>";
+      return '<div class="' + cls + '"' + attr + ">" + num + l.h + "</div>";
     }).join("");
     /* 行棋记录总是停在最新的一步 */
     lg.scrollTop = lg.scrollHeight;

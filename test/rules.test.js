@@ -159,6 +159,40 @@ describe("堵岸", () => {
     state.getGame().pcolor = ["b", "r"];
     expect(rules.movesFor(state.getGame(), roi2).some(m => i2xy(m.to).y > 4)).toBe(true);
   });
+
+  it("堵岸时，岸上的象可跃入任意河格", () => {
+    const L = xy2i(1, 4), R = xy2i(4, 4), r24 = xy2i(2, 4), r34 = xy2i(3, 4);
+    const riverDests = (g, i) => rules.movesFor(g, i)
+      .filter(m => rules.isRiver(m.to)).map(m => m.to).sort((a, b) => a - b);
+
+    /* 未堵岸：岸上的象只能进正对的那一格河 */
+    state.setGame(mk([[L, ELEPHANT]], []));
+    expect(riverDests(state.getGame(), L)).toEqual([r24]);
+
+    /* 己方堵岸：两格河都能进，且没有重复着法 */
+    state.setGame(mk([[L, ELEPHANT], [R, 9]], []));
+    const G = state.getGame();
+    expect(riverDests(G, L)).toEqual([r24, r34]);
+    expect(rules.movesFor(G, L).filter(m => m.to === r24).length).toBe(1);
+
+    /* 另一格河里有敌子：照常「压住」 */
+    state.setGame(mk([[L, ELEPHANT], [R, 9]], [[r34, DRAGON]]));
+    const G2 = state.getGame();
+    expect(rules.movesFor(G2, L).find(m => m.to === r34).kind).toBe("press");
+
+    /* 河格已有己方子（明面或被压在下面）：跳不进去 */
+    G2.board[r34] = { t: 7, c: "r", rv: true, uid: 90 };
+    expect(rules.movesFor(G2, L).some(m => m.to === r34)).toBe(false);
+    G2.board[r34] = { t: DRAGON, c: "b", rv: true, uid: 91,
+      under: { t: 7, c: "r", rv: true, uid: 92 } };
+    expect(rules.movesFor(G2, L).some(m => m.to === r34)).toBe(false);
+
+    /* 象一离开岸，堵岸即解除 */
+    state.setGame(mk([[L, ELEPHANT], [R, 9]], []));
+    const G3 = state.getGame();
+    rules.applyMove(G3, { from: L, to: r34, kind: "move" });
+    expect(rules.blockadeColor(G3)).toBe(null);
+  });
 });
 
 describe("河", () => {

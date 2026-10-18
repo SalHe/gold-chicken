@@ -7,11 +7,161 @@ import {
   getGame, getMode, getAiFirst, setAiFirst, getUndoStack, getActions, getBaseSnapshot,
   getPositionHistory, getAiPaused, setAiPaused,
   isReplaying, getReplayInfo, beginReplay, replayStep, replayGoto, adoptReplay, endReplay,
-  setMode as setStateMode
+  setMode as setStateMode, getLastNote, setFeedback
 } from "./state.js";
 
 let aiTimer = null;
 let replayTimer = null;
+
+/* ---------- 偏好设置：速度 / 主题 / 音效 / 震动 ---------- */
+var PREF = {
+  speed: "gold-chicken.speed.v1",
+  theme: "gold-chicken.theme.v1",
+  sound: "gold-chicken.sound.v1",
+  vibe: "gold-chicken.vibe.v1"
+};
+var speed = "mid", theme = "auto", soundOn = false, vibeOn = false;
+var SPEED_DELAY = { slow: [920, 320], mid: [480, 260], fast: [150, 120] };
+var REPLAY_MS = { slow: 1100, mid: 620, fast: 280 };
+
+function readPref(key, valid, dflt){
+  try{
+    var v = typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
+    if (v == null) return dflt;
+    if (valid && valid.indexOf(v) < 0) return dflt;
+    return v;
+  }catch(e){ return dflt; }
+}
+function writePref(key, v){
+  try{ if (typeof localStorage !== "undefined") localStorage.setItem(key, v); }catch(e){}
+}
+
+function syncSpeed(){
+  var ids = { slow: "spSlow", mid: "spMid", fast: "spFast" };
+  for (var k in ids){
+    if (Object.prototype.hasOwnProperty.call(ids, k)){
+      document.getElementById(ids[k]).setAttribute("aria-pressed", speed === k ? "true" : "false");
+    }
+  }
+}
+function setSpeed(v){
+  if (v !== "slow" && v !== "mid" && v !== "fast") return;
+  speed = v;
+  writePref(PREF.speed, v);
+  syncSpeed();
+  if (replayTimer) startReplayTimer();   /* 回放中改速度立即生效 */
+}
+function syncTheme(){
+  var ids = { auto: "thAuto", light: "thLight", dark: "thDark" };
+  for (var k in ids){
+    if (Object.prototype.hasOwnProperty.call(ids, k)){
+      document.getElementById(ids[k]).setAttribute("aria-pressed", theme === k ? "true" : "false");
+    }
+  }
+}
+function applyTheme(){
+  try{
+    var root = document.documentElement;
+    if (!root) return;
+    if (theme === "auto"){
+      if (root.removeAttribute) root.removeAttribute("data-theme");
+    } else if (root.setAttribute){
+      root.setAttribute("data-theme", theme);
+    }
+  }catch(e){}
+}
+function setTheme(v){
+  if (v !== "auto" && v !== "light" && v !== "dark") return;
+  theme = v;
+  writePref(PREF.theme, v);
+  applyTheme();
+  syncTheme();
+}
+function syncSwitches(){
+  var s = document.getElementById("swSound"), v = document.getElementById("swVibe");
+  s.setAttribute("aria-checked", soundOn ? "true" : "false");
+  s.textContent = soundOn ? "开" : "关";
+  s.classList.toggle("on", soundOn);
+  v.setAttribute("aria-checked", vibeOn ? "true" : "false");
+  v.textContent = vibeOn ? "开" : "关";
+  v.classList.toggle("on", vibeOn);
+}
+
+/* ---------- 音效 / 震动：默认关闭，由设置里的开关打开 ---------- */
+var actx = null;
+var SOUND = {
+  flip: [520, .06, "triangle", .04],
+  move: [300, .05, "sine", .035],
+  press: [190, .09, "square", .04],
+  capture: [150, .13, "sawtooth", .05],
+  trade: [240, .11, "triangle", .045],
+  thirst: [120, .2, "sawtooth", .05],
+  dive: [90, .35, "sawtooth", .06],
+  win: [660, .25, "triangle", .05],
+  draw: [330, .2, "sine", .045]
+};
+var VIBE = {
+  flip: 12, move: 8, press: 16, capture: 24, trade: 20,
+  thirst: 30, dive: [30, 50, 30], win: [25, 60, 25], draw: 28
+};
+function tone(freq, dur, type, gain){
+  try{
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!actx) actx = new AC();
+    if (actx.state === "suspended" && actx.resume) actx.resume();
+    var t0 = actx.currentTime;
+    var o = actx.createOscillator(), g = actx.createGain();
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, t0);
+    g.gain.setValueAtTime(Math.max(0.0001, gain || 0.04), t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t0); o.stop(t0 + dur + 0.02);
+  }catch(e){}
+}
+function feedback(kind){
+  var s = SOUND[kind];
+  if (soundOn && s) tone(s[0], s[1], s[2], s[3]);
+  if (vibeOn && VIBE[kind] && typeof navigator !== "undefined" && navigator.vibrate){
+    try{ navigator.vibrate(VIBE[kind]); }catch(e){}
+  }
+}
+function setSound(on){
+  soundOn = !!on;
+  writePref(PREF.sound, soundOn ? "1" : "0");
+  syncSwitches();
+  if (soundOn) tone(660, .08, "triangle", .05);   /* 在点击手势里初始化音频上下文 */
+}
+function setVibe(on){
+  vibeOn = !!on;
+  writePref(PREF.vibe, vibeOn ? "1" : "0");
+  syncSwitches();
+  if (vibeOn && typeof navigator !== "undefined" && navigator.vibrate){
+    try{ navigator.vibrate(20); }catch(e){}
+  }
+}
+
+/* ---------- 走子播报 ---------- */
+var popTimer = null;
+function hideMovePop(){
+  if (popTimer){ clearTimeout(popTimer); popTimer = null; }
+  var pop = document.getElementById("movePop");
+  if (pop){ pop.classList.remove("show"); pop.textContent = ""; }
+}
+function announce(turnBefore){
+  var pop = document.getElementById("movePop");
+  var note = getLastNote();
+  if (!pop || !note) return;
+  var who = getMode() === "aiai" ? (turnBefore === 0 ? "电脑A" : "电脑B") : "电脑";
+  pop.textContent = who + "：" + note;
+  pop.classList.add("show");
+  if (popTimer) clearTimeout(popTimer);
+  popTimer = setTimeout(function(){
+    popTimer = null;
+    pop.classList.remove("show");
+  }, 1900);
+}
 let replayDemo = null;
 /* 本次回放是否由结束界面的「复盘本局」发起；退出时要把终局告示还原 */
 let replayFromVictory = false;
@@ -50,9 +200,10 @@ function scheduleAI(){
     aiTimer = null;
     if (isReplaying() || !isAITurn() || getAiPaused()) return;
     var g = getGame();
+    var turnBefore = g.turn;
     var a = aiPick(g, g.turn, { history: getPositionHistory() });
-    if (a) commit(a);
-  }, 480 + Math.random() * 260);
+    if (a){ commit(a); announce(turnBefore); }
+  }, SPEED_DELAY[speed][0] + Math.random() * SPEED_DELAY[speed][1]);
 }
 
 /* AI 对弈的单步：暂停自动行棋，立刻替当前一方走一手。
@@ -63,8 +214,9 @@ function stepAI(){
   if (isReplaying() || getMode() !== "aiai") return;
   var g = getGame();
   if (!g || g.result) return;
+  var turnBefore = g.turn;
   var a = aiPick(g, g.turn, { history: getPositionHistory() });
-  if (a) commit(a); else syncPace();
+  if (a){ commit(a); announce(turnBefore); } else syncPace();
 }
 function applyPace(paused){
   setAiPaused(paused);
@@ -114,7 +266,7 @@ function startReplayTimer(){
       if (!isReplaying()) replayDemo = null;
       updateReplayButtons();
     }
-  }, 620);
+  }, REPLAY_MS[speed]);
   updateReplayButtons();
 }
 function playDemo(d){
@@ -164,8 +316,19 @@ function setMode(m){
 }
 
 function start(){
+  /* 偏好设置：读不到就回到默认（速度中、主题跟随系统、音效/震动关） */
+  speed = readPref(PREF.speed, ["slow", "mid", "fast"], "mid");
+  theme = readPref(PREF.theme, ["auto", "light", "dark"], "auto");
+  soundOn = readPref(PREF.sound, null, "0") === "1";
+  vibeOn = readPref(PREF.vibe, null, "0") === "1";
+  applyTheme();
+  setFeedback(feedback);
+
   setChanged(function(reset){
-    if (reset) ui.clearPieceCache();
+    if (reset){
+      ui.clearPieceCache();
+      hideMovePop();
+    }
     ui.render();
     syncPace();
     if (!getGame().result && !isReplaying() && isAITurn() && !getAiPaused()) scheduleAI();
@@ -174,6 +337,9 @@ function start(){
   ui.initUi();
   ui.buildGrid();
   syncModeButtons();
+  syncSpeed();
+  syncTheme();
+  syncSwitches();
   newGame();
 
   function freshGame(){
@@ -281,6 +447,17 @@ function start(){
   }
   document.getElementById("btnUndo").addEventListener("click", doUndo);
   document.getElementById("qbUndo").addEventListener("click", doUndo);
+
+  /* 终局告示上的悔棋：只撤回决胜的一手，让棋局回到未分胜负的状态 */
+  function undoFromVictory(){
+    if (isReplaying() || !getUndoStack().length) return;
+    stopAI();
+    if (getMode() === "aiai") setAiPaused(true);
+    undo(1);
+    hideMovePop();
+    syncPace();
+  }
+  document.getElementById("vUndo").addEventListener("click", undoFromVictory);
 
   /* 当前对局打包成 Demo：起始快照 + 走子序列，保存和复制共用。
      回放中或还没走过子时没有可导出的对局，返回 null。 */
@@ -535,6 +712,18 @@ function start(){
     syncModeButtons();
     freshGame();
   });
+
+  /* 速度：同时作用于电脑行棋与 Demo 回放 */
+  document.getElementById("spSlow").addEventListener("click", function(){ setSpeed("slow"); });
+  document.getElementById("spMid").addEventListener("click", function(){ setSpeed("mid"); });
+  document.getElementById("spFast").addEventListener("click", function(){ setSpeed("fast"); });
+  /* 主题：跟随系统 / 强制浅色 / 强制深色，写在 <html data-theme> 上并持久化 */
+  document.getElementById("thAuto").addEventListener("click", function(){ setTheme("auto"); });
+  document.getElementById("thLight").addEventListener("click", function(){ setTheme("light"); });
+  document.getElementById("thDark").addEventListener("click", function(){ setTheme("dark"); });
+  /* 音效 / 震动：默认关闭，开关状态持久化 */
+  document.getElementById("swSound").addEventListener("click", function(){ setSound(!soundOn); });
+  document.getElementById("swVibe").addEventListener("click", function(){ setVibe(!vibeOn); });
 
   /* 页面被重新发布时保留对局 */
   try{

@@ -27,6 +27,11 @@
     <button id="bAuto" aria-pressed="true" title="电脑连续行棋">自动</button>
     <button id="bStep" aria-pressed="false" title="暂停，每点一次走一手">单步</button>
   </div>
+  <div class="seg" id="speedSeg" role="group" aria-label="电脑行棋与回放速度">
+    <button id="spSlow" aria-pressed="false" title="慢速">慢</button>
+    <button id="spMid" aria-pressed="true" title="中速">中</button>
+    <button id="spFast" aria-pressed="false" title="快速">快</button>
+  </div>
 </div>
 
 <div class="layout">
@@ -37,8 +42,8 @@
         <div class="axis-y"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span></div>
         <div class="board">
           <div class="stack" id="stack">
-            <div class="grid" id="grid"></div>
-            <div class="pieces" id="pieces"></div>
+            <div class="grid" id="grid" role="group" aria-label="棋盘"></div>
+            <div class="pieces" id="pieces" aria-hidden="true"></div>
           </div>
           <div class="victory" id="victory" hidden>
             <div class="vcard">
@@ -47,6 +52,7 @@
               <div class="vwhy" id="vWhy"></div>
               <div class="vacts">
                 <button class="vbtn" id="vBtn">再来一盘</button>
+                <button class="vbtn ghost" id="vUndo" title="撤回最后一手，继续对局">悔棋</button>
                 <button class="vbtn ghost" id="vReplay" title="从开局逐手回看本局">复盘本局</button>
                 <button class="vbtn ghost" id="vCopyDemo" title="复制本局的 Demo JSON">复制 Demo</button>
                 <button class="vbtn ghost" id="vPeek" title="按住查看棋局，松开恢复">按住查看棋局</button>
@@ -54,10 +60,11 @@
               </div>
             </div>
           </div>
+          <div class="movepop" id="movePop" role="status" aria-live="polite"></div>
         </div>
       </div>
     </div>
-    <div class="hint" id="hint"></div>
+    <div class="hint" id="hint" role="status" aria-live="polite"></div>
     <div class="quickbar" id="quickBar">
       <button class="qb" id="qbUndo">悔棋</button>
       <button class="qb" id="qbNew">重新开局</button>
@@ -106,7 +113,7 @@
 
     <div class="card">
       <h2 class="t">行棋记录<button class="logmode" id="logModeBtn" aria-pressed="false" hidden title="显示整段 Demo 的记录；点击未走的记录可直接跳到那一手">全程</button></h2>
-      <div class="log" id="log"></div>
+      <div class="log" id="log" tabindex="0" aria-label="行棋记录"></div>
     </div>
 
     <div class="card">
@@ -117,6 +124,26 @@
         <button class="act" id="btnSaveDemo">保存 Demo</button>
         <button class="act" id="btnCopyDemo" title="把当前棋局的 Demo JSON 复制到剪贴板（不保存到本地）">复制当前 Demo</button>
         <button class="act" id="btnRules">规则详解</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="t">设置</h2>
+      <div class="setrow">
+        <span class="setlbl">主题</span>
+        <div class="seg small" id="themeSeg" role="group" aria-label="主题">
+          <button id="thAuto" aria-pressed="true" title="跟随系统的浅色/深色设置">跟随</button>
+          <button id="thLight" aria-pressed="false">浅色</button>
+          <button id="thDark" aria-pressed="false">深色</button>
+        </div>
+      </div>
+      <div class="setrow">
+        <span class="setlbl">音效</span>
+        <button class="switch" id="swSound" role="switch" aria-checked="false" title="翻棋、走子、吃子与终局提示音">关</button>
+      </div>
+      <div class="setrow">
+        <span class="setlbl">震动</span>
+        <button class="switch" id="swVibe" role="switch" aria-checked="false" title="支持震动的设备上，行棋与吃子时短震">关</button>
       </div>
     </div>
 
@@ -165,7 +192,7 @@
     <h4>岸与河</h4>
     <ul>
       <li><b>龙上岸会被渴死。</b>龙走进任一「岸」格，当即阵亡（即便那一格上有它能吃掉的敌子，吃子之后仍然渴死）。</li>
-      <li><b>下河：</b>只有龙和象能进「河」格，其余棋子进不去（也不会淹死，只是走不进去）。站在河边的四格陆地（(2,3)、(3,3)、(2,5)、(3,5)）上时，<b>正走、斜走都能进任一河格</b>；岸上的象只能走进正对着的那一格河。</li>
+      <li><b>下河：</b>只有龙和象能进「河」格，其余棋子进不去（也不会淹死，只是走不进去）。站在河边的四格陆地（(2,3)、(3,3)、(2,5)、(3,5)）上时，<b>正走、斜走都能进任一河格</b>；岸上的象平时只能走进正对着的那一格河，<b>己方堵岸时可直接跃入任意一格河</b>。</li>
       <li><b>河里不吃子、不兑子：</b>河格是「压」不是「吃」。龙、象入河时，若那一格已有<b>敌方</b>棋子，不论大小都把它<b>压在下面</b>（落点标 ▼）——被压的棋子仍在原格活着，但动弹不得，也不能被吃；压在上面的棋子一离开，它就重新露出来。同阶相遇也不会同归于尽。</li>
       <li><b>河格不能同色共存：</b>已有己方棋子的河格（无论露在上面还是被压在下面）走不进去——河里没有自残，也不会出现两枚己方棋子同格。</li>
       <li>岸是陆地，除龙以外的任何棋子都可以自由停留。</li>
@@ -174,12 +201,13 @@
     </ul>
 
     <h4>堵岸</h4>
-    <p>同一方的棋子同时占住两个「岸」格，就构成<b>堵岸</b>。效果有四：</p>
+    <p>同一方的棋子同时占住两个「岸」格，就构成<b>堵岸</b>。效果有五：</p>
     <ul>
       <li>占据两岸的那两枚棋子<b>免疫敌方攻击</b>，敌子吃不掉它们。</li>
       <li>敌方金鸡<b>不能飞越河界</b>。己方占住岸时，只有对手的金鸡被拦住；己方金鸡照飞不误。</li>
       <li>敌方留在「河」里的棋子被<b>封死在河中</b>，不能移动。</li>
       <li>此时双方任意一方的<b>豹都可以从紧挨河界的陆地跳入河中</b>，并引爆（站在「岸」格上的豹不能下河）。</li>
+      <li>占岸一方的象如果正站在岸上，可以直接跃入<b>任意一格河</b>（落点照常「压」子）；象一离开岸，堵岸随即解除。</li>
     </ul>
 
     <h4>豹的引爆</h4>
@@ -203,7 +231,7 @@
     </ul>
 
     <div class="note">
-      <b>判定说明</b>（规则原文未明确处的取法）：同子相吃双方同时阵亡，自残同阶亦然；堵岸的免疫只作用于占住两岸的那两枚棋子，不是全队免疫；堵岸以「已翻开的棋子」为准，暗棋占岸不算数，翻开后即时生效；豹引爆只能从紧挨河界的陆地跳入河格（四格河边陆地都可，两个河格任选，河格上有棋子也能跳），不能从「岸」格下河；金鸡飞行虽不受阻挡，但落点仍不能是「河」格；「河中受困」按字面取全封——敌方一旦堵岸，己方河中之子连那 6 个出口也一并封住，完全不能动，直到堵岸被拆；本方的堵岸不会封住本方的河中之子；「出水」只优待河中之子；进河时，龙、象可以从四格河边陆地正走或斜走进任一河格（岸上的子只能进正对的那一格河）；河中被压的棋子仍计入存子，也不会造成「吃光」或将死判定；豹引爆时，河格中压着的上下两枚棋子一并阵亡；死局判定中只要河里还有被压的棋子，就不算死局。
+      <b>判定说明</b>（规则原文未明确处的取法）：同子相吃双方同时阵亡，自残同阶亦然；堵岸的免疫只作用于占住两岸的那两枚棋子，不是全队免疫；堵岸以「已翻开的棋子」为准，暗棋占岸不算数，翻开后即时生效；豹引爆只能从紧挨河界的陆地跳入河格（四格河边陆地都可，两个河格任选，河格上有棋子也能跳），不能从「岸」格下河；金鸡飞行虽不受阻挡，但落点仍不能是「河」格；「河中受困」按字面取全封——敌方一旦堵岸，己方河中之子连那 6 个出口也一并封住，完全不能动，直到堵岸被拆；本方的堵岸不会封住本方的河中之子；「出水」只优待河中之子；进河时，龙、象可以从四格河边陆地正走或斜走进任一河格（岸上的子只能进正对的那一格河，唯有堵岸一方的象可任选一格）；河中被压的棋子仍计入存子，也不会造成「吃光」或将死判定；豹引爆时，河格中压着的上下两枚棋子一并阵亡；死局判定中只要河里还有被压的棋子，就不算死局。
     </div>
   </div>
 </div>
