@@ -1,9 +1,11 @@
 /* 棋盘编辑器：纯摆棋模型与开局校验。无 DOM。 */
 import { describe, it, expect } from "vitest";
 import { N } from "../src/constants.js";
+import { xy, terrain } from "../src/rules.js";
 import {
   createEditor, selectRank, isPlaced, placementsOf, placeAt, removeAt,
-  clearPlacements, setFirst, setHidden, buildGame, validatePosition, validateEditor
+  clearPlacements, setFirst, setHidden, buildGame, validatePosition, validateEditor,
+  pieceCount
 } from "../src/editor.js";
 import { xy2i } from "./helpers/factory.js";
 
@@ -52,18 +54,64 @@ describe("摆棋草稿", () => {
     expect(placeAt(ed, 0)).toBe(false);
   });
 
-  it("陆地、岸、河共 28 格都能落子", () => {
+  it("陆地都能落子；岸上除龙外都能放；河格只有龙和象", () => {
     for (let i = 0; i < N; i++){
+      const c = xy(i);
+      if (terrain(c.x, c.y) !== "land") continue;
       const ed = createEditor();
       expect(place(ed, "r", 5, i)).toBe(true);
       expect(placementsOf(ed)[0].i).toBe(i);
     }
+    const bank = createEditor();
+    expect(place(bank, "r", 5, xy2i(1, 4))).toBe(true);   /* 岸：虎 */
+    expect(place(bank, "b", 6, xy2i(4, 4))).toBe(true);   /* 岸：豹 */
+    expect(place(bank, "r", 1, xy2i(1, 4))).toBe(false);  /* 岸：龙会渴死 */
+
+    const river = createEditor();
+    expect(place(river, "r", 1, xy2i(2, 4))).toBe(true);  /* 河：龙 */
+    expect(place(river, "r", 4, xy2i(3, 4))).toBe(true);  /* 河：象 */
+    expect(place(river, "r", 5, xy2i(2, 4))).toBe(false); /* 河：虎不行 */
+    expect(place(river, "r", 12, xy2i(3, 4))).toBe(false);/* 河：鸡不行 */
+  });
+
+  it("河格与岸上的棋子自动落成明棋，陆地仍按明暗选择", () => {
+    const ed = createEditor();          /* 默认「暗棋」 */
+    expect(place(ed, "r", 5, xy2i(1, 4))).toBe(true);    /* 岸 */
+    expect(place(ed, "r", 1, xy2i(2, 4))).toBe(true);    /* 河 */
+    expect(place(ed, "r", 6, xy2i(1, 1))).toBe(true);    /* 陆地 */
+    const list = placementsOf(ed);
+    expect(list.find(p => p.i === xy2i(1, 4)).rv).toBe(true);
+    expect(list.find(p => p.i === xy2i(2, 4)).rv).toBe(true);
+    expect(list.find(p => p.i === xy2i(1, 1)).rv).toBe(false);
+  });
+
+  it("河格落下敌方棋子会压住原格，且不能再压第三枚", () => {
     const ed = createEditor();
-    expect(place(ed, "r", 5, xy2i(1, 4))).toBe(true);   /* 岸 */
-    expect(place(ed, "r", 6, xy2i(4, 4))).toBe(true);   /* 岸 */
-    expect(place(ed, "r", 1, xy2i(2, 4))).toBe(true);   /* 河 */
-    expect(place(ed, "r", 4, xy2i(3, 4))).toBe(true);   /* 河 */
-    expect(placementsOf(ed).length).toBe(4);
+    expect(place(ed, "b", 4, xy2i(2, 4))).toBe(true);    /* 黑象入河 */
+    expect(place(ed, "r", 1, xy2i(2, 4))).toBe(true);    /* 红龙压住它 */
+    expect(ed.cells[xy2i(2, 4)]).toEqual({
+      t: 1, c: "r", rv: true, under: { t: 4, c: "b", rv: true }
+    });
+    /* 被压住的阶数仍占用，不能重复选择 */
+    expect(isPlaced(ed, "b", 4)).toBe(true);
+    expect(selectRank(ed, "b", 4)).toBe(false);
+    /* 已经压着一枚，不能再压第三枚 */
+    expect(place(ed, "b", 1, xy2i(2, 4))).toBe(false);
+    /* 同色棋子点在同一河格是替换，不是压住 */
+    const ed2 = createEditor();
+    expect(place(ed2, "r", 1, xy2i(2, 4))).toBe(true);
+    expect(place(ed2, "r", 4, xy2i(2, 4))).toBe(true);
+    expect(ed2.cells[xy2i(2, 4)]).toEqual({ t: 4, c: "r", rv: true });
+  });
+
+  it("河格压子只能是敌方，且在开局校验里同样成立", () => {
+    const ok = [
+      { i: xy2i(2, 4), t: 1, c: "r", rv: true, under: { t: 4, c: "b", rv: true } },
+      { i: 0, t: 5, c: "r", rv: true },
+      { i: 27, t: 6, c: "b", rv: true }
+    ];
+    expect(validatePosition(ok, "r").ok).toBe(true);
+    expect(pieceCount(ok)).toBe(4);
   });
 
   it("明暗只影响落子当时：暗棋保留具体身份，明棋 rv:true", () => {
@@ -153,6 +201,55 @@ describe("开局校验", () => {
       { i: 27, t: 6, c: "b", rv: true }
     ], "r").ok).toBe(false);
   });
+
+  it("河里与岸上的阵地限制、暗棋限制都会拒绝开局", () => {
+    const black = { i: 27, t: 6, c: "b", rv: true };
+    expect(validatePosition([
+      { i: xy2i(2, 4), t: 1, c: "r", rv: false }, black
+    ], "r").reason).toContain("不能是暗棋");
+    expect(validatePosition([
+      { i: xy2i(1, 4), t: 5, c: "r", rv: false }, black
+    ], "r").reason).toContain("不能是暗棋");
+    expect(validatePosition([
+      { i: xy2i(2, 4), t: 5, c: "r", rv: true }, black
+    ], "r").reason).toContain("只有龙和象");
+    expect(validatePosition([
+      { i: xy2i(1, 4), t: 1, c: "r", rv: true }, black
+    ], "r").reason).toContain("龙不能摆在岸上");
+  });
+
+  it("压子数据不合法时拒绝开局", () => {
+    const ok = [
+      { i: xy2i(2, 4), t: 1, c: "r", rv: true, under: { t: 4, c: "b", rv: true } },
+      { i: 0, t: 5, c: "r", rv: true },
+      { i: 27, t: 6, c: "b", rv: true }
+    ];
+    const land = [
+      { i: 0, t: 1, c: "r", rv: true, under: { t: 4, c: "b", rv: true } },
+      { i: 27, t: 6, c: "b", rv: true }
+    ];
+    expect(validatePosition(land, "r").reason).toContain("只有河格");
+    expect(validatePosition(ok.map(function(pl){
+      return pl.i === xy2i(2, 4)
+        ? { i: pl.i, t: 1, c: "r", rv: true, under: { t: 4, c: "r", rv: true } }
+        : pl;
+    }), "r").reason).toContain("敌方");
+    expect(validatePosition(ok.map(function(pl){
+      return pl.i === xy2i(2, 4)
+        ? { i: pl.i, t: 1, c: "r", rv: true, under: { t: 4, c: "b", rv: false } }
+        : pl;
+    }), "r").reason).toContain("不能是暗棋");
+    expect(validatePosition(ok.map(function(pl){
+      return pl.i === xy2i(2, 4)
+        ? { i: pl.i, t: 1, c: "r", rv: true,
+            under: { t: 4, c: "b", rv: true, under: { t: 5, c: "b", rv: true } } }
+        : pl;
+    }), "r").reason).toContain("最多压住");
+    expect(validatePosition([
+      { i: xy2i(2, 4), t: 1, c: "r", rv: true, under: { t: 4, c: "b", rv: true } },
+      { i: 27, t: 4, c: "b", rv: true }
+    ], "r").reason).toContain("已经摆过了");
+  });
 });
 
 describe("生成游戏对象", () => {
@@ -179,5 +276,21 @@ describe("生成游戏对象", () => {
     const g = buildGame(list, "b", 0);
     expect(g.pcolor).toEqual(["b", "r"]);
     expect(g.turn).toBe(0);
+  });
+
+  it("buildGame 保留压子关系，uid 连续且不重叠", () => {
+    const pressed = [
+      { i: xy2i(2, 4), t: 1, c: "r", rv: true, under: { t: 4, c: "b", rv: true } },
+      { i: xy2i(1, 1), t: 5, c: "r", rv: false },
+      { i: xy2i(4, 7), t: 6, c: "b", rv: true }
+    ];
+    const g = buildGame(pressed, "r", 10);
+    expect(g.board[xy2i(2, 4)]).toEqual({
+      uid: 11, t: 1, c: "r", rv: true,
+      under: { uid: 12, t: 4, c: "b", rv: true }
+    });
+    expect(g.board[xy2i(1, 1)].uid).toBe(13);
+    expect(g.board[xy2i(4, 7)].uid).toBe(14);
+    expect(pieceCount(pressed)).toBe(4);
   });
 });

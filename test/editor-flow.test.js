@@ -3,6 +3,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vites
 import { installDomStub } from "./helpers/dom-stub.js";
 import * as state from "../src/state.js";
 import * as ui from "../src/ui.js";
+import { xy2i } from "./helpers/factory.js";
 
 let doc;
 const el = id => doc.getElementById(id);
@@ -88,6 +89,22 @@ describe("摆棋开始游戏", () => {
     expect(ui.isEditorOpen()).toBe(false);
     expect(el("editor").hidden).toBe(true);
     expect(state.snapshot()).toBe(before);
+  });
+
+  it("河格压子能带进对局", () => {
+    el("btnEditor").click();
+    place("b", 4, xy2i(2, 4));        /* 黑象入河（自动明棋） */
+    place("r", 1, xy2i(2, 4));        /* 红龙压住黑象 */
+    place("r", 5, xy2i(1, 1));
+    place("b", 6, xy2i(4, 7));
+    el("edStart").click();
+
+    const g = state.getGame();
+    expect(g.board[xy2i(2, 4)]).toMatchObject({
+      t: 1, c: "r", rv: true, under: { t: 4, c: "b", rv: true }
+    });
+    expect(g.board[xy2i(2, 4)].under.uid).not.toBe(g.board[xy2i(2, 4)].uid);
+    expect(g.log[0].h).toContain("红方 2 子、黑方 2 子");
   });
 });
 

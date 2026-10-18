@@ -9,8 +9,8 @@ import {
 import { listDemos } from "./demo.js";
 import { pieceArtSrc } from "./piece-art.js";
 import {
-  createEditor, isPlaced, selectRank, placementsOf, placeAt, removeAt,
-  clearPlacements, setFirst, setHidden, validateEditor
+  createEditor, isPlaced, selectRank, placeAt, removeAt,
+  clearPlacements, setFirst, setHidden, validateEditor, placementIssue
 } from "./editor.js";
 
 let gridEl = null, pieceEl = null, stackEl = null;
@@ -32,6 +32,8 @@ let edModalEl = null, edGridEl = null, edPieceEl = null, edRedEl = null, edBlack
 let edReasonEl = null, edStartEl = null, edFirstREl = null, edFirstBEl = null;
 let edVisHiddenEl = null, edVisShownEl = null;
 let edCells = [], edPalette = [], edFocusIdx = 0;
+/* 最近一次落子被拒绝的原因；显示在状态行，下一次操作时清掉 */
+let edNotice = null;
 /* 键盘焦点所在的格（roving tabindex）：整张棋盘只占一个 Tab 位 */
 let focusIdx = 0;
 /* 被用户关掉的结束界面。记结果对象本身而不是布尔值：
@@ -627,6 +629,7 @@ export function openEditor(){
   edReturnFocus = document.activeElement || null;
   ed = createEditor();
   edOpen = true;
+  edNotice = null;
   edFocusIdx = 0;
   if (edModalEl) edModalEl.hidden = false;
   buildEditorGrid();
@@ -649,6 +652,7 @@ export function closeEditor(){
   if (edModalEl) edModalEl.hidden = true;
   edOpen = false;
   ed = null;                    /* 取消即丢弃草稿，不影响当前对局 */
+  edNotice = null;
   edCells = [];
   edPalette = [];
   const back = edReturnFocus;
@@ -661,33 +665,46 @@ export function closeEditor(){
 export function clearEditor(){
   if (!ed) return;
   clearPlacements(ed);
+  edNotice = null;
   renderEditor();
 }
 
 export function setEditorFirst(c){
   if (!ed) return;
   setFirst(ed, c);
+  edNotice = null;
   renderEditor();
 }
 
 export function setEditorHidden(hidden){
   if (!ed) return;
   setHidden(ed, hidden);
+  edNotice = null;
   renderEditor();
 }
 
-/* 棋盘点击：选中调色板棋子时落子（目标格已有棋子则替换）；
-   没有选择时点已有棋子即移除。 */
+/* 棋盘点击：选中调色板棋子时落子；河格里的敌方棋子会被压住，
+   其余已有棋子则被替换。没有选择时点已有棋子即移除（连同压子）。 */
 export function onEditorCell(i){
   if (!ed) return;
-  if (ed.sel) placeAt(ed, i);
-  else removeAt(ed, i);
+  if (ed.sel){
+    const issue = placementIssue(ed, i);
+    if (issue){
+      edNotice = issue;
+      renderEditor();
+      return;
+    }
+    if (placeAt(ed, i)) edNotice = null;
+  } else if (removeAt(ed, i)){
+    edNotice = null;
+  }
   renderEditor();
 }
 
 export function onEditorPalette(c, t){
   if (!ed) return;
   selectRank(ed, c, t);
+  edNotice = null;
   renderEditor();
 }
 
@@ -764,29 +781,38 @@ function editorPieceLabel(p){
   return (p.c === "r" ? "红方" : "黑方") + NUM[p.t] + NAME[p.t] + (p.rv ? "" : "（暗）");
 }
 
+/* 编辑器棋子预览。暗棋保留正面：摆棋时要能核对究竟是哪一枚，
+   用虚线环 + 「暗」角标表示开局后是盖着的。
+   pressed = 被压在河格下面的那枚，缩小后偏移到右下角。 */
+function addEditorPiece(p, i, pressed){
+  const c = xy(i);
+  const el = makePieceEl(p);
+  el.dataset.i = String(i);
+  el.style.setProperty("--px", String(c.x - 1));
+  el.style.setProperty("--py", String(c.y - 1));
+  el.classList.add(p.c === "r" ? "red" : "black");
+  if (pressed) el.classList.add("pressed");
+  else if (p.under) el.classList.add("pressing");
+  if (!p.rv){
+    el.classList.add("ed-hidden");
+    const tag = document.createElement("span");
+    tag.className = "ed-hide-tag";
+    tag.textContent = "暗";
+    el.appendChild(tag);
+  }
+  edPieceEl.appendChild(el);
+}
+
 export function renderEditor(){
   if (!ed) return;
   const st = validateEditor(ed);
 
-  /* 暗棋在编辑器里保留正面：摆棋时要能核对究竟是哪一枚，
-     用虚线环 + 「暗」角标表示开局后是盖着的。 */
   clearNode(edPieceEl);
-  const list = placementsOf(ed);
-  for (let k = 0; k < list.length; k++){
-    const pl = list[k], c = xy(pl.i);
-    const el = makePieceEl(pl);
-    el.dataset.i = String(pl.i);
-    el.style.setProperty("--px", String(c.x - 1));
-    el.style.setProperty("--py", String(c.y - 1));
-    el.classList.add(pl.c === "r" ? "red" : "black");
-    if (!pl.rv){
-      el.classList.add("ed-hidden");
-      const tag = document.createElement("span");
-      tag.className = "ed-hide-tag";
-      tag.textContent = "暗";
-      el.appendChild(tag);
-    }
-    edPieceEl.appendChild(el);
+  for (let i = 0; i < N; i++){
+    const p = ed.cells[i];
+    if (!p) continue;
+    addEditorPiece(p, i, false);
+    if (p.under) addEditorPiece(p.under, i, true);   /* 河格下面压着的子 */
   }
   if (edPieceEl) edPieceEl.dataset.face = pieceFace;
 
@@ -804,8 +830,8 @@ export function renderEditor(){
   if (edVisHiddenEl) edVisHiddenEl.setAttribute("aria-pressed", ed.hidden ? "true" : "false");
   if (edVisShownEl) edVisShownEl.setAttribute("aria-pressed", ed.hidden ? "false" : "true");
   if (edReasonEl){
-    edReasonEl.textContent = st.reason;
-    edReasonEl.classList.toggle("ok", st.ok);
+    edReasonEl.textContent = edNotice || st.reason;
+    edReasonEl.classList.toggle("ok", !edNotice && st.ok);
   }
   if (edStartEl) edStartEl.disabled = !st.ok;
 
@@ -815,6 +841,7 @@ export function renderEditor(){
       "(" + c.x + "," + c.y + ")" + "，";
     const p = ed.cells[i];
     label += p ? editorPieceLabel(p) : "空";
+    if (p && p.under) label += "，压着 " + editorPieceLabel(p.under);
     edCells[i].setAttribute("aria-label", label);
   }
 }

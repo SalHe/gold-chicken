@@ -44,10 +44,10 @@ describe("编辑器渲染", () => {
     ui.openEditor();
     palette("r", 5).click();
     expect(palette("r", 5).classList.contains("sel")).toBe(true);
-    cell(xy2i(1, 4)).click();          /* 岸格也能落子 */
+    cell(xy2i(1, 1)).click();
 
     const ed = ui.getEditorState();
-    expect(ed.cells[xy2i(1, 4)]).toEqual({ t: 5, c: "r", rv: false });
+    expect(ed.cells[xy2i(1, 1)]).toEqual({ t: 5, c: "r", rv: false });
     expect(ed.sel).toBe(null);
     const pieces = el("edPieces").children;
     expect(pieces.length).toBe(1);
@@ -95,6 +95,69 @@ describe("编辑器渲染", () => {
     expect(ed.cells[27].rv).toBe(true);
     ui.setEditorHidden(true);
     expect(ed.cells[27].rv).toBe(true);
+  });
+
+  it("河格与岸上的棋子自动为明棋，预览不带「暗」角标", () => {
+    ui.openEditor();
+    palette("r", 1).click();
+    cell(xy2i(2, 4)).click();          /* 河：龙 */
+    palette("r", 4).click();
+    cell(xy2i(3, 4)).click();          /* 河：象 */
+    palette("r", 5).click();
+    cell(xy2i(1, 4)).click();          /* 岸：虎 */
+    const ed = ui.getEditorState();
+    expect(ed.cells[xy2i(2, 4)].rv).toBe(true);
+    expect(ed.cells[xy2i(3, 4)].rv).toBe(true);
+    expect(ed.cells[xy2i(1, 4)].rv).toBe(true);
+    const pieces = el("edPieces").children;
+    expect(pieces.length).toBe(3);
+    pieces.forEach(function(p){
+      expect(p.classList.contains("ed-hidden")).toBe(false);
+      expect(p.children.some(x => x.className === "ed-hide-tag")).toBe(false);
+    });
+  });
+
+  it("河里只收龙和象、岸上不收龙，状态行说明原因", () => {
+    ui.openEditor();
+    palette("r", 5).click();
+    cell(xy2i(2, 4)).click();          /* 虎不能入河 */
+    expect(ui.getEditorState().cells[xy2i(2, 4)]).toBe(null);
+    expect(el("edReason").textContent).toContain("只有龙和象");
+    expect(palette("r", 5).classList.contains("sel")).toBe(true);
+
+    palette("r", 5).click();           /* 取消选择 */
+    palette("r", 1).click();
+    cell(xy2i(1, 4)).click();          /* 龙不能上岸 */
+    expect(ui.getEditorState().cells[xy2i(1, 4)]).toBe(null);
+    expect(el("edReason").textContent).toContain("龙上岸");
+    expect(el("edStart").disabled).toBe(true);
+  });
+
+  it("河格点敌方棋子会压住，预览两枚都在；清空可整体移除", () => {
+    ui.openEditor();
+    palette("b", 4).click();
+    cell(xy2i(2, 4)).click();
+    palette("r", 1).click();
+    cell(xy2i(2, 4)).click();          /* 红龙压住黑象 */
+    const ed = ui.getEditorState();
+    expect(ed.cells[xy2i(2, 4)]).toEqual({
+      t: 1, c: "r", rv: true, under: { t: 4, c: "b", rv: true }
+    });
+    const pieces = el("edPieces").children;
+    expect(pieces.length).toBe(2);
+    expect(pieces[0].classList.contains("pressing")).toBe(true);
+    expect(pieces[1].classList.contains("pressed")).toBe(true);
+
+    /* 已经压着一枚，再点会被拒绝 */
+    palette("b", 1).click();
+    cell(xy2i(2, 4)).click();
+    expect(el("edReason").textContent).toContain("先清空");
+
+    /* 未选择时点该格：连同压子一起移除 */
+    palette("b", 1).click();
+    cell(xy2i(2, 4)).click();
+    expect(ui.getEditorState().cells[xy2i(2, 4)]).toBe(null);
+    expect(el("edPieces").children.length).toBe(0);
   });
 
   it("双方各摆一枚后可以开始；清空后重新禁用", () => {

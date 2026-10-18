@@ -256,7 +256,7 @@
   <div class="sheet ed-sheet" role="dialog" aria-modal="true" aria-labelledby="edTitle">
     <button class="act close" id="edClose">关闭</button>
     <h3 id="edTitle">编辑棋盘</h3>
-    <p class="lead">选择棋子与明暗，再点棋盘落子；没有选择时点已有棋子可移除，有选择时点已有棋子可替换。开始后会替换当前对局。</p>
+    <p class="lead">选择棋子与明暗，再点棋盘落子；没有选择时点已有棋子可移除（连同压子），有选择时点已有棋子可替换。只有龙和象能进河，龙不能摆在岸上；河格与岸上的棋子自动为明棋。河格已有敌方明棋时，再点它会把它压住（先清空可替换）。开始后会替换当前对局。</p>
     <div class="ed-body">
       <div class="ed-boardcol">
         <div class="board ed-board">

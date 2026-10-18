@@ -5,7 +5,7 @@ import {
   counts, deadPosition, allActions, applyMove, positionKey,
   updateChase, chaseLoss, blockadeDrawLoser
 } from "./rules.js";
-import { buildGame, validatePosition } from "./editor.js";
+import { buildGame, validatePosition, pieceCount } from "./editor.js";
 
 let game = null;
 let sel = -1, curMoves = [], armed = -1, undoStack = [], uidSeq = 0, mode = "pvp";
@@ -106,12 +106,16 @@ export function startFromPosition(placements, opts){
   const first = opts && opts.first === "b" ? "b" : "r";
   if (!validatePosition(placements, first).ok) return false;
   game = buildGame(placements, first, uidSeq);
-  uidSeq += placements.length;
+  uidSeq += pieceCount(placements);
   sel = -1; curMoves = []; armed = -1; undoStack = [];
   actions = []; aiPaused = false;          /* 新开局总是回到自动行棋 */
   let r = 0, b = 0;
   for (let k = 0; k < placements.length; k++){
-    if (placements[k].c === "r") r++; else b++;
+    const pl = placements[k];
+    if (pl.c === "r") r++; else b++;
+    if (pl.under){
+      if (pl.under.c === "r") r++; else b++;
+    }
   }
   /* 恰好一条系统日志：它会占据行棋记录的第一行，但不算「第几手」。 */
   say("s", "自定义开局：" + (first === "r" ? "红方" : "黑方") + "先手，红方 " + r +

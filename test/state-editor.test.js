@@ -116,4 +116,28 @@ describe("startFromPosition", () => {
     while (state.replayStep());
     expect(JSON.stringify(state.getGame())).toBe(expected);
   });
+
+  it("河格压子保留在局面里，人数与连续开局的 uid 都算上压子", () => {
+    const river = xy2i(2, 4);
+    const pressed = [
+      { i: river, t: 1, c: "r", rv: true, under: { t: 4, c: "b", rv: true } },
+      { i: R, t: 5, c: "r", rv: false },
+      { i: B, t: 6, c: "b", rv: true }
+    ];
+    expect(state.startFromPosition(pressed, { first: "r" })).toBe(true);
+    let g = state.getGame();
+    expect(g.board[river]).toMatchObject({
+      t: 1, c: "r", rv: true, under: { t: 4, c: "b", rv: true }
+    });
+    expect(g.log[0].h).toContain("红方 2 子、黑方 2 子");
+    const first = [g.board[river].uid, g.board[river].under.uid,
+      g.board[R].uid, g.board[B].uid];
+    expect(new Set(first).size).toBe(4);
+
+    state.startFromPosition(pressed, { first: "r" });
+    g = state.getGame();
+    const second = [g.board[river].uid, g.board[river].under.uid,
+      g.board[R].uid, g.board[B].uid];
+    second.forEach(function(u){ expect(first.indexOf(u)).toBe(-1); });
+  });
 });
