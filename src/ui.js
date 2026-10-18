@@ -8,6 +8,10 @@ import {
 } from "./state.js";
 import { listDemos } from "./demo.js";
 import { pieceArtSrc } from "./piece-art.js";
+import {
+  createEditor, isPlaced, selectRank, placementsOf, placeAt, removeAt,
+  clearPlacements, setFirst, setHidden, validateEditor
+} from "./editor.js";
 
 let gridEl = null, pieceEl = null, stackEl = null;
 let cellEls = [];
@@ -18,7 +22,16 @@ let pieceFace = "text";
 export function setPieceFace(mode){
   pieceFace = mode === "icon" || mode === "art" ? mode : "text";
   if (pieceEl) pieceEl.dataset.face = pieceFace;
+  if (edPieceEl) edPieceEl.dataset.face = pieceFace;
 }
+
+/* ---------- 棋盘编辑器 ----------
+   草稿只存在于 UI 层：取消/关闭直接丢弃，不会碰活棋状态。 */
+let ed = null, edOpen = false, edReturnFocus = null;
+let edModalEl = null, edGridEl = null, edPieceEl = null, edRedEl = null, edBlackEl = null;
+let edReasonEl = null, edStartEl = null, edFirstREl = null, edFirstBEl = null;
+let edVisHiddenEl = null, edVisShownEl = null;
+let edCells = [], edPalette = [], edFocusIdx = 0;
 /* 键盘焦点所在的格（roving tabindex）：整张棋盘只占一个 Tab 位 */
 let focusIdx = 0;
 /* 被用户关掉的结束界面。记结果对象本身而不是布尔值：
@@ -580,6 +593,230 @@ export function renderReplay(){
   if (!info){ bar.hidden = true; return; }
   bar.hidden = false;
   document.getElementById("replayInfo").textContent = "回放 " + info.idx + " / " + info.total + " 手";
+}
+
+/* ================= 棋盘编辑器 ================= */
+function clearNode(el){
+  if (!el) return;
+  while (el.firstChild) el.removeChild(el.firstChild);
+}
+
+function cacheEditorEls(){
+  edModalEl = document.getElementById("editor");
+  edGridEl = document.getElementById("edGrid");
+  edPieceEl = document.getElementById("edPieces");
+  edRedEl = document.getElementById("edRed");
+  edBlackEl = document.getElementById("edBlack");
+  edReasonEl = document.getElementById("edReason");
+  edStartEl = document.getElementById("edStart");
+  edFirstREl = document.getElementById("edFirstR");
+  edFirstBEl = document.getElementById("edFirstB");
+  edVisHiddenEl = document.getElementById("edVisHidden");
+  edVisShownEl = document.getElementById("edVisShown");
+}
+
+export function isEditorOpen(){ return edOpen; }
+export function getEditorState(){ return ed; }
+export function editorStatus(){
+  if (!ed) return { ok: false, reason: "编辑器未打开。", placements: [], first: "r" };
+  return validateEditor(ed);
+}
+
+export function openEditor(){
+  cacheEditorEls();
+  edReturnFocus = document.activeElement || null;
+  ed = createEditor();
+  edOpen = true;
+  edFocusIdx = 0;
+  if (edModalEl) edModalEl.hidden = false;
+  buildEditorGrid();
+  buildEditorPalette();
+  renderEditor();
+  if (edCells[0] && edCells[0].focus){
+    try{ edCells[0].focus(); }catch(e){}
+  }
+}
+
+/* 开始失败时把弹层重新亮出来（正常流程里不会走到）。 */
+export function showEditor(){
+  if (!ed){ openEditor(); return; }
+  edOpen = true;
+  if (edModalEl) edModalEl.hidden = false;
+  renderEditor();
+}
+
+export function closeEditor(){
+  if (edModalEl) edModalEl.hidden = true;
+  edOpen = false;
+  ed = null;                    /* 取消即丢弃草稿，不影响当前对局 */
+  edCells = [];
+  edPalette = [];
+  const back = edReturnFocus;
+  edReturnFocus = null;
+  if (back && back.focus){
+    try{ back.focus(); }catch(e){}
+  }
+}
+
+export function clearEditor(){
+  if (!ed) return;
+  clearPlacements(ed);
+  renderEditor();
+}
+
+export function setEditorFirst(c){
+  if (!ed) return;
+  setFirst(ed, c);
+  renderEditor();
+}
+
+export function setEditorHidden(hidden){
+  if (!ed) return;
+  setHidden(ed, hidden);
+  renderEditor();
+}
+
+/* 棋盘点击：选中调色板棋子时落子（目标格已有棋子则替换）；
+   没有选择时点已有棋子即移除。 */
+export function onEditorCell(i){
+  if (!ed) return;
+  if (ed.sel) placeAt(ed, i);
+  else removeAt(ed, i);
+  renderEditor();
+}
+
+export function onEditorPalette(c, t){
+  if (!ed) return;
+  selectRank(ed, c, t);
+  renderEditor();
+}
+
+function editorKey(e, i){
+  if (e.key === "Enter" || e.key === " " || e.key === "Spacebar"){
+    if (e.preventDefault) e.preventDefault();
+    onEditorCell(i);
+    return;
+  }
+  const c = xy(i);
+  let nx = c.x, ny = c.y;
+  if (e.key === "ArrowLeft") nx--;
+  else if (e.key === "ArrowRight") nx++;
+  else if (e.key === "ArrowUp") ny--;
+  else if (e.key === "ArrowDown") ny++;
+  else return;
+  if (e.preventDefault) e.preventDefault();
+  nx = Math.max(1, Math.min(W, nx));
+  ny = Math.max(1, Math.min(H, ny));
+  const n = (ny - 1) * W + (nx - 1);
+  edFocusIdx = n;
+  for (let k = 0; k < edCells.length; k++) edCells[k].tabIndex = k === n ? 0 : -1;
+  if (edCells[n] && edCells[n].focus) edCells[n].focus();
+}
+
+/* 编辑器的格子与调色板都在打开时重建，按钮直接绑 click——
+   测试桩没有事件冒泡与 closest，直接绑定最稳。 */
+function buildEditorGrid(){
+  clearNode(edGridEl);
+  edCells = [];
+  for (let i = 0; i < N; i++){
+    const c = xy(i), t = terrain(c.x, c.y);
+    const d = document.createElement("div");
+    d.className = "cell " + (t === "river" ? "river" : t === "bank" ? "bank" : "land-b");
+    d.dataset.i = String(i);
+    d.setAttribute("role", "button");
+    d.tabIndex = i === edFocusIdx ? 0 : -1;
+    if (t === "bank"){
+      const l = document.createElement("span");
+      l.className = "lbl";
+      l.textContent = "岸";
+      d.appendChild(l);
+    }
+    d.addEventListener("click", function(){ onEditorCell(i); });
+    d.addEventListener("keydown", function(e){ editorKey(e, i); });
+    edGridEl.appendChild(d);
+    edCells.push(d);
+  }
+}
+
+function buildEditorPalette(){
+  clearNode(edRedEl);
+  clearNode(edBlackEl);
+  edPalette = [];
+  for (let k = 0; k < 2; k++){
+    const c = k === 0 ? "r" : "b";
+    const box = c === "r" ? edRedEl : edBlackEl;
+    for (let t = 1; t <= 12; t++){
+      const b = document.createElement("button");
+      b.className = "ed-pt " + c;
+      b.dataset.c = c;
+      b.dataset.t = String(t);
+      b.textContent = NUM[t] + NAME[t];
+      b.title = (c === "r" ? "红方 " : "黑方 ") + NUM[t] + NAME[t];
+      b.addEventListener("click", function(){ onEditorPalette(c, t); });
+      box.appendChild(b);
+      edPalette.push({ el: b, c: c, t: t });
+    }
+  }
+}
+
+function editorPieceLabel(p){
+  if (!p) return "";
+  return (p.c === "r" ? "红方" : "黑方") + NUM[p.t] + NAME[p.t] + (p.rv ? "" : "（暗）");
+}
+
+export function renderEditor(){
+  if (!ed) return;
+  const st = validateEditor(ed);
+
+  /* 暗棋在编辑器里保留正面：摆棋时要能核对究竟是哪一枚，
+     用虚线环 + 「暗」角标表示开局后是盖着的。 */
+  clearNode(edPieceEl);
+  const list = placementsOf(ed);
+  for (let k = 0; k < list.length; k++){
+    const pl = list[k], c = xy(pl.i);
+    const el = makePieceEl(pl);
+    el.dataset.i = String(pl.i);
+    el.style.setProperty("--px", String(c.x - 1));
+    el.style.setProperty("--py", String(c.y - 1));
+    el.classList.add(pl.c === "r" ? "red" : "black");
+    if (!pl.rv){
+      el.classList.add("ed-hidden");
+      const tag = document.createElement("span");
+      tag.className = "ed-hide-tag";
+      tag.textContent = "暗";
+      el.appendChild(tag);
+    }
+    edPieceEl.appendChild(el);
+  }
+  if (edPieceEl) edPieceEl.dataset.face = pieceFace;
+
+  for (let k = 0; k < edPalette.length; k++){
+    const p = edPalette[k];
+    const used = isPlaced(ed, p.c, p.t);
+    const on = !!(ed.sel && ed.sel.c === p.c && ed.sel.t === p.t);
+    p.el.disabled = used;
+    p.el.classList.toggle("used", used);
+    p.el.classList.toggle("sel", on);
+    p.el.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  if (edFirstREl) edFirstREl.setAttribute("aria-pressed", ed.first === "r" ? "true" : "false");
+  if (edFirstBEl) edFirstBEl.setAttribute("aria-pressed", ed.first === "b" ? "true" : "false");
+  if (edVisHiddenEl) edVisHiddenEl.setAttribute("aria-pressed", ed.hidden ? "true" : "false");
+  if (edVisShownEl) edVisShownEl.setAttribute("aria-pressed", ed.hidden ? "false" : "true");
+  if (edReasonEl){
+    edReasonEl.textContent = st.reason;
+    edReasonEl.classList.toggle("ok", st.ok);
+  }
+  if (edStartEl) edStartEl.disabled = !st.ok;
+
+  for (let i = 0; i < edCells.length; i++){
+    const c = xy(i), t = terrain(c.x, c.y);
+    let label = (t === "river" ? "河 " : t === "bank" ? "岸 " : "") +
+      "(" + c.x + "," + c.y + ")" + "，";
+    const p = ed.cells[i];
+    label += p ? editorPieceLabel(p) : "空";
+    edCells[i].setAttribute("aria-label", label);
+  }
 }
 
 /* ================= 交互 ================= */

@@ -717,6 +717,61 @@ button.act:disabled{opacity:.45; cursor:not-allowed}
 }
 .sheet .close{position:absolute; right:14px; top:12px}
 
+/* ---------- 棋盘编辑器 ---------- */
+/* 弹层里的棋盘独立缩放，不继承主棋盘的 --cellw；z-index 低于二次确认 */
+.modal.editor{--cellw:clamp(38px, 11vw, 58px); z-index:55}
+.ed-sheet{max-width:780px}
+.ed-body{
+  display:flex; gap:20px; flex-wrap:wrap; justify-content:center;
+  align-items:flex-start;
+}
+.ed-boardcol{display:flex; flex-direction:column; gap:8px; align-items:center; min-width:0}
+.ed-side{flex:1 1 260px; min-width:0; display:flex; flex-direction:column; gap:12px}
+.ed-opts{display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px}
+.ed-opts .seg{margin-left:0}
+.ed-group{display:flex; flex-direction:column; gap:5px}
+.ed-pts{display:flex; flex-wrap:wrap; gap:5px}
+.ed-pt{
+  font:inherit; font-family:var(--serif); font-size:12px; line-height:1;
+  min-width:44px; padding:6px 8px; border-radius:6px; cursor:pointer;
+  border:1px solid var(--line-strong); background:var(--surface-2); color:var(--fg);
+  transition:background .15s, border-color .15s, color .15s;
+}
+.ed-pt.r{border-color:color-mix(in srgb, var(--red-ring) 55%, var(--line-strong))}
+.ed-pt.b{border-color:color-mix(in srgb, var(--blk-ring) 55%, var(--line-strong))}
+.ed-pt:hover:not(:disabled){background:var(--gold-soft); border-color:var(--gold)}
+.ed-pt.sel{background:var(--gold); border-color:var(--gold); color:var(--bg); font-weight:700}
+.ed-pt:disabled{opacity:.32; cursor:not-allowed; text-decoration:line-through}
+.ed-pt:focus-visible{outline:2px solid var(--gold); outline-offset:2px}
+.editor .cell{cursor:pointer}
+.editor .cell:hover{box-shadow:inset 0 0 0 2px var(--gold), 0 0 12px var(--gold-soft)}
+/* 编辑器里棋子只是预览：点击要落到下面的格子上，才能替换/移除 */
+.editor .pieces, .editor .piece{pointer-events:none}
+/* 编辑器里的暗棋：正面可见（便于核对），虚线环 + 「暗」角标表示开局后盖着 */
+.editor .piece.ed-hidden .disc.front{
+  border-style:dashed; filter:saturate(.55);
+}
+.ed-hide-tag{
+  position:absolute; left:-3px; bottom:-3px; z-index:2;
+  width:calc(var(--cellw) * .34); height:calc(var(--cellw) * .34);
+  display:flex; align-items:center; justify-content:center;
+  border-radius:50%; pointer-events:none;
+  font-family:var(--serif); font-weight:700; font-size:calc(var(--cellw) * .19); line-height:1;
+  color:var(--gold); background:var(--surface); border:1px solid var(--gold);
+  box-shadow:0 1px 3px rgba(0,0,0,.35);
+}
+.ed-reason{
+  min-height:1.6em; max-width:320px; text-align:center;
+  font-size:12.5px; line-height:1.5; color:var(--danger);
+}
+.ed-reason.ok{color:var(--ok)}
+.ed-acts{display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:18px}
+.ed-spacer{flex:1}
+@media (max-width:560px){
+  .ed-body{gap:14px}
+  .ed-side{flex-basis:100%}
+}
+
 /* ---------- 二次确认（重新开局等破坏性操作） ---------- */
 .confirm{position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; padding:20px}
 .confirm[hidden]{display:none}

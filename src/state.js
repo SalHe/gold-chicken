@@ -5,6 +5,7 @@ import {
   counts, deadPosition, allActions, applyMove, positionKey,
   updateChase, chaseLoss, blockadeDrawLoser
 } from "./rules.js";
+import { buildGame, validatePosition } from "./editor.js";
 
 let game = null;
 let sel = -1, curMoves = [], armed = -1, undoStack = [], uidSeq = 0, mode = "pvp";
@@ -96,6 +97,29 @@ export function newGame(){
   posHistory = [positionKey(game)];
   baseSnapshot = snapshot();
   notify(true);
+}
+
+/* 用摆好的初始局面开一局。placements 为 editor.js 的 placementsOf() 结果；
+   opts.first 是先手颜色（占座位 0）。回放中拒绝，调用方应先 endReplay()。 */
+export function startFromPosition(placements, opts){
+  if (replay) return false;
+  const first = opts && opts.first === "b" ? "b" : "r";
+  if (!validatePosition(placements, first).ok) return false;
+  game = buildGame(placements, first, uidSeq);
+  uidSeq += placements.length;
+  sel = -1; curMoves = []; armed = -1; undoStack = [];
+  actions = []; aiPaused = false;          /* 新开局总是回到自动行棋 */
+  let r = 0, b = 0;
+  for (let k = 0; k < placements.length; k++){
+    if (placements[k].c === "r") r++; else b++;
+  }
+  /* 恰好一条系统日志：它会占据行棋记录的第一行，但不算「第几手」。 */
+  say("s", "自定义开局：" + (first === "r" ? "红方" : "黑方") + "先手，红方 " + r +
+           " 子、黑方 " + b + " 子。");
+  posHistory = [positionKey(game)];
+  baseSnapshot = snapshot();
+  notify(true);
+  return true;
 }
 
 export function snapshot(){

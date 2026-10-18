@@ -3,6 +3,7 @@ function El(tag){
   const el = {
     tagName: tag || "div",
     children: [],
+    get firstChild(){ return this.children.length ? this.children[0] : null; },
     _cls: "",
     textContent: "",
     innerHTML: "",
@@ -16,6 +17,11 @@ function El(tag){
       contains(c){ return this._s.has(c); }
     },
     appendChild(c){ this.children.push(c); return c; },
+    removeChild(c){
+      const i = this.children.indexOf(c);
+      if (i >= 0) this.children.splice(i, 1);
+      return c;
+    },
     remove(){},
     querySelector(){ return El("span"); },
     querySelectorAll(){ return []; },

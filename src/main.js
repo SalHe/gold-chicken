@@ -3,7 +3,7 @@ import { aiPick } from "./ai.js";
 import * as ui from "./ui.js";
 import { getDemo, saveDemo, removeDemo, newDemoId, parseDemos, importDemos } from "./demo.js";
 import {
-  setChanged, newGame, snapshot, commit, isAITurn, undo,
+  setChanged, newGame, snapshot, commit, isAITurn, undo, startFromPosition,
   getGame, getMode, getAiFirst, setAiFirst, getUndoStack, getActions, getBaseSnapshot,
   getPositionHistory, getAiPaused, setAiPaused,
   isReplaying, getReplayInfo, beginReplay, replayStep, replayGoto, adoptReplay, endReplay,
@@ -208,11 +208,11 @@ function legacyCopy(text){
 function stopAI(){ if (aiTimer){ clearTimeout(aiTimer); aiTimer = null; } }
 
 function scheduleAI(){
-  if (getAiPaused()) return;
+  if (getAiPaused() || ui.isEditorOpen()) return;
   if (aiTimer) clearTimeout(aiTimer);
   aiTimer = setTimeout(function(){
     aiTimer = null;
-    if (isReplaying() || !isAITurn() || getAiPaused()) return;
+    if (isReplaying() || ui.isEditorOpen() || !isAITurn() || getAiPaused()) return;
     const g = getGame();
     const turnBefore = g.turn;
     const a = aiPick(g, g.turn, { history: getPositionHistory() });
@@ -346,7 +346,8 @@ function start(){
     }
     ui.render();
     syncPace();
-    if (!getGame().result && !isReplaying() && isAITurn() && !getAiPaused()) scheduleAI();
+    if (!getGame().result && !isReplaying() && !ui.isEditorOpen() &&
+        isAITurn() && !getAiPaused()) scheduleAI();
   });
 
   ui.initUi();
@@ -693,6 +694,47 @@ function start(){
     startReplayTimer();
   });
 
+  /* ---------- 摆棋：独立弹层，开始前不改动当前对局 ---------- */
+  function openEditor(){
+    exitReplay();                 /* 回放是临时态，不带到编辑器背后 */
+    stopAI();
+    ui.openEditor();
+  }
+  /* 关闭编辑器后接上刚才暂停的电脑行棋（单步暂停时保持暂停） */
+  function resumeAI(){
+    const g = getGame();
+    if (!g || g.result || isReplaying() || getMode() === "pvp" || getAiPaused()) return;
+    scheduleAI();
+  }
+  function closeEditor(){
+    ui.closeEditor();
+    resumeAI();
+  }
+  function startCustomGame(){
+    const st = ui.editorStatus();
+    if (!st.ok) return;
+    exitReplay();
+    stopAI();
+    /* 先在弹层背后装好局面；notify 因编辑器打开而不会调度 AI，
+       关闭弹层后在这里补一次调度。 */
+    if (!startFromPosition(st.placements, { first: st.first })) return;
+    ui.closeEditor();
+    const g = getGame();
+    if (g && !g.result && isAITurn() && !getAiPaused()) scheduleAI();
+  }
+
+  document.getElementById("btnEditor").addEventListener("click", openEditor);
+  document.getElementById("qbEditor").addEventListener("click", openEditor);
+  document.getElementById("edClose").addEventListener("click", closeEditor);
+  document.getElementById("edCancel").addEventListener("click", closeEditor);
+  document.getElementById("edVeil").addEventListener("click", closeEditor);
+  document.getElementById("edClear").addEventListener("click", ui.clearEditor);
+  document.getElementById("edFirstR").addEventListener("click", function(){ ui.setEditorFirst("r"); });
+  document.getElementById("edFirstB").addEventListener("click", function(){ ui.setEditorFirst("b"); });
+  document.getElementById("edVisHidden").addEventListener("click", function(){ ui.setEditorHidden(true); });
+  document.getElementById("edVisShown").addEventListener("click", function(){ ui.setEditorHidden(false); });
+  document.getElementById("edStart").addEventListener("click", startCustomGame);
+
   const modal = document.getElementById("modal");
   function openRules(){ modal.hidden = false; }
   document.getElementById("btnRules").addEventListener("click", openRules);
@@ -701,6 +743,7 @@ function start(){
   document.addEventListener("keydown", function(e){
     if (e.key !== "Escape") return;
     if (!confirmEl.hidden) cancelConfirm();
+    else if (ui.isEditorOpen()) closeEditor();
     else modal.hidden = true;
   });
 

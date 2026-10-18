@@ -70,6 +70,7 @@
     <div class="quickbar" id="quickBar">
       <button class="qb" id="qbUndo">悔棋</button>
       <button class="qb" id="qbNew">重新开局</button>
+      <button class="qb" id="qbEditor">摆棋</button>
       <button class="qb" id="qbRules">规则</button>
     </div>
     <div class="replaybar" id="replayBar" hidden>
@@ -122,6 +123,7 @@
       <h2 class="t">操作</h2>
       <div class="btns">
         <button class="act primary" id="btnNew">重新开局</button>
+        <button class="act" id="btnEditor" title="自定义初始局面，摆好后直接开始对局">摆棋</button>
         <button class="act" id="btnUndo">悔棋</button>
         <button class="act" id="btnSaveDemo">保存 Demo</button>
         <button class="act" id="btnCopyDemo" title="把当前棋局的 Demo JSON 复制到剪贴板（不保存到本地）">复制当前 Demo</button>
@@ -245,6 +247,48 @@
 
     <div class="note">
       <b>判定说明</b>（规则原文未明确处的取法）：同子相吃双方同时阵亡，自残同阶亦然；堵岸的免疫只作用于占住两岸的那两枚棋子，不是全队免疫；堵岸以「已翻开的棋子」为准，暗棋占岸不算数，翻开后即时生效；豹引爆只能从紧挨河界的陆地跳入河格（四格河边陆地都可，两个河格任选，河格上有棋子也能跳），不能从「岸」格下河；金鸡飞行虽不受阻挡，但落点仍不能是「河」格；「河中受困」按字面取全封——敌方一旦堵岸，己方河中之子连那 6 个出口也一并封住，完全不能动，直到堵岸被拆；本方的堵岸不会封住本方的河中之子；「出水」只优待河中之子；进河时，龙、象可以从四格河边陆地正走或斜走进任一河格（岸上的子只能进正对的那一格河，唯有堵岸一方的象可任选一格）；河中被压的棋子仍计入存子，也不会造成「吃光」或将死判定；豹引爆时，河格中压着的上下两枚棋子一并阵亡；死局判定中只要河里还有被压的棋子，就不算死局。长捉计数里「目标逃走」以目标走完后不再被同一追子威胁为准；追子被吃或邀兑，追逐即结束。堵岸改判与长捉判负都在和棋/困毙结算之前生效。
+    </div>
+  </div>
+</div>
+
+<div class="modal editor" id="editor" hidden>
+  <div class="veil" id="edVeil"></div>
+  <div class="sheet ed-sheet" role="dialog" aria-modal="true" aria-labelledby="edTitle">
+    <button class="act close" id="edClose">关闭</button>
+    <h3 id="edTitle">编辑棋盘</h3>
+    <p class="lead">选择棋子与明暗，再点棋盘落子；没有选择时点已有棋子可移除，有选择时点已有棋子可替换。开始后会替换当前对局。</p>
+    <div class="ed-body">
+      <div class="ed-boardcol">
+        <div class="board ed-board">
+          <div class="stack">
+            <div class="grid" id="edGrid" role="group" aria-label="编辑棋盘"></div>
+            <div class="pieces" id="edPieces" aria-hidden="true"></div>
+          </div>
+        </div>
+        <div class="ed-reason" id="edReason" role="status" aria-live="polite"></div>
+      </div>
+      <div class="ed-side">
+        <div class="ed-opts">
+          <span class="setlbl">先手</span>
+          <div class="seg small" role="group" aria-label="先手方">
+            <button id="edFirstR" aria-pressed="true">红方先</button>
+            <button id="edFirstB" aria-pressed="false">黑方先</button>
+          </div>
+          <span class="setlbl">落子</span>
+          <div class="seg small" role="group" aria-label="落子明暗">
+            <button id="edVisHidden" aria-pressed="true">暗棋</button>
+            <button id="edVisShown" aria-pressed="false">明棋</button>
+          </div>
+        </div>
+        <div class="ed-group"><span class="setlbl">红方</span><div class="ed-pts" id="edRed"></div></div>
+        <div class="ed-group"><span class="setlbl">黑方</span><div class="ed-pts" id="edBlack"></div></div>
+      </div>
+    </div>
+    <div class="ed-acts">
+      <button class="act" id="edClear">清空棋盘</button>
+      <span class="ed-spacer"></span>
+      <button class="act" id="edCancel">取消</button>
+      <button class="act primary" id="edStart" disabled>开始游戏</button>
     </div>
   </div>
 </div>
