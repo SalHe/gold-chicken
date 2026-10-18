@@ -202,17 +202,20 @@ body{
   width:22px; padding-top:var(--bpad);
 }
 .midrow{display:flex; gap:0}
-/* 电脑走子播报：压在棋盘底边的短暂提示条，不占布局 */
+/* 电脑走子播报：与棋盘下方的提示行叠放（短暂取代提示文字），
+   不再压住棋子，也不改变布局高度 */
+.hintrow{display:grid; justify-items:center; align-items:start; width:100%}
+.hintrow>*{grid-area:1/1; max-width:330px}
 .movepop{
-  position:absolute; left:50%; bottom:14px; z-index:16;
-  max-width:calc(100% - 24px); padding:5px 12px; border-radius:999px;
+  min-height:20px; padding:0 12px; border-radius:999px;
   background:var(--surface); border:1px solid var(--gold); color:var(--fg);
-  box-shadow:var(--shadow); font-size:12px; line-height:1.45;
+  box-shadow:var(--shadow); font-size:12px; line-height:20px; text-align:center;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  pointer-events:none; opacity:0; transform:translate(-50%, 8px);
+  pointer-events:none; opacity:0; transform:translateY(-2px);
   transition:opacity .18s, transform .18s;
 }
-.movepop.show{opacity:1; transform:translate(-50%, 0)}
+.movepop.show{opacity:1; transform:translateY(0)}
+.movepop.show + .hint{opacity:0}
 .board{
   position:relative;
   padding:9px; border-radius:14px;
@@ -562,6 +565,7 @@ button.act:disabled{opacity:.45; cursor:not-allowed}
 .gv.b{border-color:var(--blk-ring); color:var(--blk-bg)}
 .hint{
   font-size:12.5px; color:var(--muted); text-align:center; max-width:330px; min-height:19px;
+  transition:opacity .18s;
 }
 /* 窄屏快捷操作条：面板在棋盘下方，常见的悔棋/重开/规则放到棋盘边上 */
 .quickbar{display:none}
