@@ -129,6 +129,160 @@ export function startFromPosition(placements, opts){
 export function snapshot(){
   return JSON.stringify({ g: game, uid: uidSeq });
 }
+/* Export full positions for exact AI match reproduction; this includes hidden identities. */
+export function copyPosition(){
+  if (!game) return null;
+  const seen = { r: new Array(13).fill(false), b: new Array(13).fill(false) };
+  let invalid = false;
+  function mark(piece){
+    if (!piece || (piece.c !== "r" && piece.c !== "b") ||
+        !Number.isInteger(piece.t) || piece.t < 1 || piece.t > 12 || seen[piece.c][piece.t]){
+      invalid = true;
+      return;
+    }
+    seen[piece.c][piece.t] = true;
+  }
+  const board = game.board.map(function(p, i){
+    if (!p) return null;
+    const q = { uid: p.uid, rv: p.rv === true, under: null };
+    if (q.rv) { q.c = p.c; q.t = p.t; mark(q); }
+    else {
+      if (isRiver(i) || isBank(i)) invalid = true;
+      q.c = p.c; q.t = p.t; mark(q);
+    }
+    if (p.under){
+      if (p.under.rv !== true || !isRiver(i)) invalid = true;
+      else {
+        q.under = { uid: p.under.uid, c: p.under.c, t: p.under.t, rv: true };
+        mark(q.under);
+      }
+    }
+    return q;
+  });
+  const caps = { r: game.caps.r.slice(), b: game.caps.b.slice() };
+  for (const c of ["r", "b"]){
+    for (let i = 0; i < caps[c].length; i++) mark({ c: c, t: caps[c][i] });
+  }
+  if (invalid) return null;
+
+  const g = Object.assign({}, game, {
+    board: board,
+    caps: caps,
+    log: game.log.map(function(line){ return { c: line.c, h: line.h }; }),
+    last: game.last ? { from: game.last.from, to: game.last.to } : null,
+    pcolor: game.pcolor.slice(),
+    chase: game.chase ? Object.assign({}, game.chase) : null
+  });
+  return JSON.stringify({ type: "gold-chicken-position", version: 2, state: { g: g, uid: uidSeq } });
+}
+/* Import v1 public positions with shuffled hidden pieces; v2 restores exact identities. */
+export function preparePositionImport(text){
+  let data;
+  try{ data = JSON.parse(text); }catch(e){ return null; }
+  if (!data || data.type !== "gold-chicken-position") return null;
+  const fail = message => ({ ok: false, message: message });
+  if ((data.version !== 1 && data.version !== 2) || !data.state || !data.state.g) return fail("局面数据版本或结构不支持。");
+  const source = data.state, g = source.g;
+  if (!Array.isArray(g.board) || g.board.length !== N ||
+      (g.turn !== 0 && g.turn !== 1) || !Array.isArray(g.pcolor) || g.pcolor.length !== 2 ||
+      !g.caps || !Array.isArray(g.caps.r) || !Array.isArray(g.caps.b) ||
+      !Number.isInteger(g.noCap) || g.noCap < 0 || typeof g.firstFlip !== "boolean"){
+    return fail("棋局状态不完整或格式无效。");
+  }
+  const colorOk = c => c === "r" || c === "b";
+  if (g.firstFlip){
+    if (!colorOk(g.pcolor[0]) || !colorOk(g.pcolor[1]) || g.pcolor[0] === g.pcolor[1]) return fail("双方阵营信息无效。");
+  } else if (g.pcolor[0] !== null || g.pcolor[1] !== null){
+    return fail("开局阵营信息无效。");
+  }
+  const seen = { r: new Array(13).fill(false), b: new Array(13).fill(false) };
+  const uids = new Set(), hidden = [];
+  let invalid = false, maxUid = 0, revealed = 0;
+  function addUid(piece){
+    if (!Number.isInteger(piece.uid) || piece.uid < 1 || uids.has(piece.uid)){ invalid = true; return; }
+    uids.add(piece.uid);
+    if (piece.uid > maxUid) maxUid = piece.uid;
+  }
+  function mark(piece){
+    if (!piece || !colorOk(piece.c) || !Number.isInteger(piece.t) || piece.t < 1 || piece.t > 12 || seen[piece.c][piece.t]){
+      invalid = true;
+      return;
+    }
+    seen[piece.c][piece.t] = true;
+  }
+  for (let i = 0; i < N; i++){
+    const p = g.board[i];
+    if (!p) continue;
+    if (typeof p !== "object" || typeof p.rv !== "boolean") return fail("棋子数据无效。");
+    addUid(p);
+    if (p.rv){
+      revealed++;
+      mark(p);
+      if ((isRiver(i) && p.t !== 1 && p.t !== 4) || (isBank(i) && p.t === 1)) invalid = true;
+    } else {
+      if (isRiver(i) || isBank(i)) invalid = true;
+      if (data.version === 2) mark(p);
+      else { delete p.c; delete p.t; }
+      hidden.push(p);
+    }
+    if (p.under){
+      const u = p.under;
+      if (!isRiver(i) || !p.rv || typeof u !== "object" || u.rv !== true) return fail("河中压子状态无效。");
+      addUid(u); mark(u);
+      if (u.t !== 1 && u.t !== 4) invalid = true;
+      if (u.c === p.c) invalid = true;
+    }
+  }
+  if (!g.firstFlip && revealed) return fail("尚未翻棋的局面不能包含已翻开的棋子。");
+  for (const c of ["r", "b"]){
+    for (let i = 0; i < g.caps[c].length; i++) mark({ c: c, t: g.caps[c][i] });
+  }
+  if (invalid) return fail("棋子库存或位置不符合规则。");
+  const pool = [];
+  for (const c of ["r", "b"]) for (let t = 1; t <= 12; t++) if (!seen[c][t]) pool.push({ c: c, t: t });
+  if (data.version === 1){
+    if (hidden.length && pool.length !== hidden.length) return fail("暗棋池无法仅凭公开信息还原，无法安全载入此局面。");
+    shuffle(pool);
+    for (let i = 0; i < hidden.length; i++){
+      hidden[i].c = pool[i].c;
+      hidden[i].t = pool[i].t;
+    }
+  }
+  if (source.uid != null && (!Number.isInteger(source.uid) || source.uid < maxUid)) return fail("棋子序号无效。");
+  g.log = [];
+  g.last = null;
+  g.pulse = null;
+  if (g.chase){
+    const ch = g.chase;
+    if ((ch.by !== "r" && ch.by !== "b") || !Number.isInteger(ch.chaserUid) ||
+        !Number.isInteger(ch.targetUid) || !Number.isInteger(ch.rounds) || ch.rounds < 0 ||
+        typeof ch.pending !== "boolean") return fail("长捉记录无效。");
+    const chaser = g.board.find(p => p && p.uid === ch.chaserUid);
+    const target = g.board.find(p => p && p.uid === ch.targetUid);
+    if (!chaser || !target || !chaser.rv || !target.rv || chaser.c !== ch.by || target.c === ch.by){
+      return fail("长捉涉及的棋子不存在。");
+    }
+  }
+  if (g.result && g.result.kind !== "win" && g.result.kind !== "draw") return fail("终局数据无效。");
+  return { ok: true, json: JSON.stringify({ g: g, uid: source.uid || maxUid }) };
+}
+
+/* 将导入的局面设为新对局起点，悔棋与行棋记录从此处重新开始。 */
+export function startFromImportedPosition(json){
+  if (replay) return false;
+  try{
+    const o = JSON.parse(json);
+    if (!o || !o.g || !Array.isArray(o.g.board) || o.g.board.length !== N) return false;
+    game = o.g; uidSeq = o.uid || 0;
+    sel = -1; curMoves = []; armed = -1; undoStack = []; actions = [];
+    aiPaused = false; lastNote = "";
+    say("s", "从复制的完整局面开始对局，暗棋身份与复制时一致。");
+    posHistory = [positionKey(game)];
+    baseSnapshot = snapshot();
+    notify(true);
+    return true;
+  }catch(e){ return false; }
+}
 /* keepStack=true 供悔棋使用：退回到旧局面，但保留剩余的悔棋栈与走子序列 */
 export function restore(json, keepStack){
   try{

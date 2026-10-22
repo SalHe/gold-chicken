@@ -146,6 +146,28 @@ describe("自残/引爆点击流", () => {
   });
 });
 
+describe("AI 对弈单步棋盘操作", () => {
+  it("单步暂停时允许玩家走棋，自动对弈时仍拦截棋盘输入", () => {
+    const from = xy2i(1, 1), to = xy2i(1, 2);
+    state.setMode("aiai");
+    state.setAiPaused(true);
+    state.setGame(mk([[from, 3]], [[xy2i(4, 7), 3]]));
+
+    ui.onCell(from);
+    expect(state.getSel()).toBe(from);
+    ui.onCell(to);
+    expect(state.getActions().length).toBe(1);
+    expect(state.getGame().board[to].c).toBe("r");
+
+    state.setGame(mk([[from, 3]], [[xy2i(4, 7), 3]]));
+    state.setAiPaused(false);
+    ui.onCell(from);
+    expect(state.getSel()).toBe(-1);
+    state.setMode("pvp");
+    state.setAiPaused(false);
+  });
+});
+
 describe("压子与行棋记录", () => {
   it("河格压子一次点击即落子，被压的棋子缩成右下角徽记", () => {
     const from = xy2i(2, 3), to = xy2i(2, 4);

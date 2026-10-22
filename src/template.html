@@ -127,6 +127,7 @@
         <button class="act" id="btnUndo">悔棋</button>
         <button class="act" id="btnSaveDemo">保存 Demo</button>
         <button class="act" id="btnCopyDemo" title="把当前棋局的 Demo JSON 复制到剪贴板（不保存到本地）">复制当前 Demo</button>
+        <button class="act" id="btnCopyPosition" title="复制当前时刻的完整局面，包含暗棋身份；复制内容可查看暗棋">复制此局面（含暗棋）</button>
         <button class="act" id="btnRules">规则详解</button>
       </div>
     </div>
@@ -163,9 +164,9 @@
       <h2 class="t">对局 Demo</h2>
       <div class="demo-list" id="demoList"></div>
       <div class="demo-tools">
-        <button class="demo-import" id="btnDemoImport" title="读取剪贴板里的 Demo JSON 并导入">从剪贴板导入</button>
+        <button class="demo-import" id="btnDemoImport" title="导入 Demo，或载入复制的棋局局面">从剪贴板导入 Demo / 局面</button>
         <div class="demo-importbox" id="demoImportBox" hidden>
-          <textarea id="demoImportText" placeholder="剪贴板读不到时，在这里粘贴 Demo JSON（单条或数组）" aria-label="粘贴 Demo JSON"></textarea>
+          <textarea id="demoImportText" placeholder="粘贴 Demo JSON 或复制的局面 JSON" aria-label="粘贴 Demo 或局面 JSON"></textarea>
           <div class="demo-importacts">
             <button class="demo-import" id="btnDemoImportDo">导入</button>
             <button class="demo-import" id="btnDemoImportCancel">取消</button>

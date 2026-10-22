@@ -7,7 +7,8 @@ import {
   getGame, getMode, getAiFirst, setAiFirst, getUndoStack, getActions, getBaseSnapshot,
   getPositionHistory, getAiPaused, setAiPaused,
   isReplaying, getReplayInfo, beginReplay, replayStep, replayGoto, adoptReplay, endReplay,
-  setMode as setStateMode, getLastNote, setFeedback
+  setMode as setStateMode, getLastNote, setFeedback,
+  copyPosition, preparePositionImport, startFromImportedPosition
 } from "./state.js";
 
 let aiTimer = null;
@@ -515,6 +516,18 @@ function start(){
     copyText(txt).then(function(){ done(true); }, function(){ done(legacyCopy(txt)); });
   });
 
+  /* 复制当前显示时刻的公开局面；回放中即复制当前停留的那一手。 */
+  const btnCopyPosition = document.getElementById("btnCopyPosition");
+  btnCopyPosition.addEventListener("click", function(){
+    const txt = copyPosition();
+    const done = function(ok){
+      btnCopyPosition.textContent = ok ? "局面已复制 ✓" : "复制失败";
+      setTimeout(function(){ btnCopyPosition.textContent = "复制此局面（含暗棋）"; }, 1400);
+    };
+    if (!txt){ done(false); return; }
+    copyText(txt).then(function(){ done(true); }, function(){ done(legacyCopy(txt)); });
+  });
+
   /* 结束界面的「复盘本局」：把本局当作一段 Demo 从头逐手回看，停在开局。
      关闭结束界面后再进回放，棋局由只读变为可控的回放视图。 */
   document.getElementById("vReplay").addEventListener("click", function(){
@@ -604,7 +617,7 @@ function start(){
   function importFeedback(msg){
     importBtn.textContent = msg;
     if (importTimer) clearTimeout(importTimer);
-    importTimer = setTimeout(function(){ importBtn.textContent = "从剪贴板导入"; }, 1600);
+    importTimer = setTimeout(function(){ importBtn.textContent = "从剪贴板导入 Demo / 局面"; }, 1600);
   }
   function showImportBox(){
     importBox.hidden = false;
@@ -612,6 +625,33 @@ function start(){
   }
   function hideImportBox(){ importBox.hidden = true; }
   function doImport(text){
+    const position = preparePositionImport(text);
+    if (position){
+      if (!position.ok){ importFeedback(position.message); return; }
+      const loadPosition = function(){
+        stopAI();
+        stopReplayTimer();
+        if (isReplaying()) exitReplay();
+        replayFromVictory = false;
+        replayDemo = null;
+        ui.clearVictoryDismissed();
+        if (!startFromImportedPosition(position.json)){
+          importFeedback("局面载入失败");
+          return;
+        }
+        syncModeButtons();
+        updateReplayButtons();
+        hideImportBox();
+        importText.value = "";
+        importFeedback("局面已载入 ✓");
+      };
+      if (isReplaying() || getActions().length){
+        askConfirm("载入复制的局面？",
+          "当前对局与悔棋记录会被替换。载入后会恢复复制时的暗棋身份；剪贴板内容包含这些身份。",
+          "载入局面", loadPosition);
+      } else loadPosition();
+      return;
+    }
     const parsed = parseDemos(text);
     const added = importDemos(text);
     ui.renderDemos();

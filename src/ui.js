@@ -849,7 +849,8 @@ export function renderEditor(){
 /* ================= 交互 ================= */
 export function onCell(i){
   const g = getGame();
-  if (!g || g.result || isReplaying() || isAITurn()) return;
+  const manualAiStep = getMode() === "aiai" && getAiPaused();
+  if (!g || g.result || isReplaying() || (isAITurn() && !manualAiStep)) return;
   const p = g.board[i];
   const mine = g.pcolor[g.turn];
 
