@@ -54,9 +54,14 @@ export function adjacentCount(g, i){
 }
 
 const WIN = 1e7;
-/* 威胁权重：对手的威胁马上会兑现，自己的威胁对手还有一手可解 */
-const W_OPP_THREAT = 0.55;
-const W_MY_THREAT = 0.35;
+/* 可由 aiPick 的 weights 选项覆盖，便于离线自对弈调参；默认策略不变。 */
+export const DEFAULT_WEIGHTS = Object.freeze({
+  endgameMaterial: 320,
+  myThreat: 0.35,
+  opponentThreat: 0.55,
+  mobility: 0.3,
+  blockadeBase: 30
+});
 
 /* 两个河格与各格的上下左右邻居（纯几何，模块初始化时算好） */
 const RIVER_CELLS = [id(2, 4), id(3, 4)];
@@ -340,7 +345,8 @@ function chasePressure(g, col){
 
 /* ---------- 估值 ---------- */
 /* 只依据「已翻开」的信息估值（暗棋身份不参与任何计算） */
-export function evalPos(g, col){
+export function evalPos(g, col, weights){
+  weights = weights || DEFAULT_WEIGHTS;
   const solo = soloDragonScore(g, col);
   if (solo !== null) return solo;
   const opp = otherColor(col);
@@ -368,11 +374,13 @@ export function evalPos(g, col){
     const top = g.board[RIVER_CELLS[i]];
     const u = top && top.under;
     if (!u) continue;
+    totalPieces++;
     if (u.c === col) myMat += VAL[u.t]; else opMat += VAL[u.t];
   }
 
   /* 子力差在残局里权重更大：领先时乐于兑子，落后时回避兑子 */
-  let s = (myMat - opMat) * (1 + 320 / (myMat + opMat + 320));
+  let s = (myMat - opMat) * (1 + weights.endgameMaterial /
+    (myMat + opMat + weights.endgameMaterial));
   const lead = myMat - opMat;
 
   const ctx = { mvs: mvs, kindAt: kindAt, bl: blockadeColor(g), dive: { r: false, b: false } };
@@ -413,7 +421,7 @@ export function evalPos(g, col){
   let a, b, gain;
   for (a = 0; a < mine.length; a++){
     for (b = 0; b < theirs.length; b++){
-      s += W_MY_THREAT * attackGain(g, mine[a], theirs[b], ctx);
+      s += weights.myThreat * attackGain(g, mine[a], theirs[b], ctx);
     }
   }
   for (a = 0; a < theirs.length; a++){
@@ -424,7 +432,7 @@ export function evalPos(g, col){
          换来强子继续压上的主动权，往往更接近「以弱换强」。 */
       const tw = (lead > 80 && g.board[mine[b]].t !== ROOSTER &&
                 VAL[g.board[mine[b]].t] <= 22) ? 0.4 : 1;
-      s -= W_OPP_THREAT * gain * tw;
+      s -= weights.opponentThreat * gain * tw;
     }
   }
 
@@ -580,7 +588,7 @@ export function evalPos(g, col){
   let myMob = 0, opMob = 0;
   for (i = 0; i < mine.length; i++) myMob += Math.min(mvs[mine[i]].length, 20);
   for (i = 0; i < theirs.length; i++) opMob += Math.min(mvs[theirs[i]].length, 20);
-  s += (myMob - opMob) * 0.3;
+  s += (myMob - opMob) * weights.mobility;
 
   /* 逼角与走闲棋：领先且对方只剩一两枚子时，把它往边角赶，
      压缩它的活动空间；机动性差就是「闲棋」的资本——我方有得等，
@@ -671,7 +679,7 @@ export function evalPos(g, col){
     /* 堵岸的基础价值按局面调整：双岸免疫本身值钱，但它的主要意义
        在于「冻住河中敌子」和「拦住敌方金鸡」。没有这两样时价值打折；
        己方在河边堆子堵住龙的入水口，则还要再扣。 */
-    let bv = 30 + 0.3 * frozen;
+    let bv = weights.blockadeBase + 0.3 * frozen;
     if (bl === col){
       if (opRooster >= 0) bv += 8;
       if (myDragon >= 0 && !isRiver(myDragon) && opRooster >= 0){
@@ -806,7 +814,7 @@ function hiddenPool(g){
 }
 /* 翻棋的期望值：对暗格可能出现的每种身份各估一次，按等概率平均。
    注意：这里只使用「可能的身份」，绝不读取该格真实的暗子。 */
-function expectedFlip(g, pi, cell, pool){
+function expectedFlip(g, pi, cell, pool, weights){
   const col = g.pcolor[pi];
   let sum = 0, i;
   for (i = 0; i < pool.length; i++){
@@ -815,8 +823,8 @@ function expectedFlip(g, pi, cell, pool){
     c.c = pool[i].c; c.t = pool[i].t; c.rv = true;
     const t = terminalScore(g2, pi);
     if (t !== null){ sum += t; continue; }
-    const q = oppBestCapture(g2, 1 - pi, col);
-    sum += (q !== null) ? q : evalPos(g2, col);
+    const q = oppBestCapture(g2, 1 - pi, col, weights);
+    sum += (q !== null) ? q : evalPos(g2, col, weights);
   }
   return sum / pool.length;
 }
@@ -826,7 +834,9 @@ function expectedFlip(g, pi, cell, pool){
    搜索按节点预算截断，不依赖真实时间，测试与对局都可复现。 */
 const SEARCH_INF = 1e9;
 const NODE_BUDGET = 6000;
-const SEARCH_MAX_PIECES = 8;    /* 只在中残局搜索；开局子多，一步评估已足够 */
+const SEARCH_MAX_PIECES = 12;   /* 全明中残局启用搜索；更多棋子时仍用期望估值 */
+const QUIESCENCE_ENDGAME_DEPTH = 2;
+const QUIESCENCE_MIDGAME_DEPTH = 1;
 
 function hasHidden(g){
   for (let i = 0; i < N; i++) if (g.board[i] && !g.board[i].rv) return true;
@@ -858,7 +868,7 @@ function applyAction(g, a){
    任何暗子的颜色或身份；没有可兑现的吃子时返回 null。
    用途：一步估值若只把对手的反吃记成「威胁」，会低估「现在吃一个、
    下一手被白吃一个更大的」这类兑子。 */
-function oppBestCapture(g, oppPi, col){
+function oppBestCapture(g, oppPi, col, weights){
   const opp = g.pcolor[oppPi];
   const bl = blockadeColor(g);
   let best = null, i, k;
@@ -878,20 +888,20 @@ function oppBestCapture(g, oppPi, col){
       const g2 = cloneG(g);
       applyAction(g2, a);
       const t = terminalScore(g2, oppPi);
-      const sc = (t !== null) ? -t : evalPos(g2, col);
+      const sc = (t !== null) ? -t : evalPos(g2, col, weights);
       if (best === null || sc < best) best = sc;
     }
   }
   return best;
 }
 /* 我方走完一手后的估分：先让对手兑现最赚的一手吃子，再静态估值。 */
-function onePlyScore(g, pi, act, col){
+function onePlyScore(g, pi, act, col, weights){
   const g2 = cloneG(g);
   applyAction(g2, act);
   const t = terminalScore(g2, pi);
   if (t !== null) return t;
-  const q = oppBestCapture(g2, 1 - pi, col);
-  return q !== null ? q : evalPos(g2, col);
+  const q = oppBestCapture(g2, 1 - pi, col, weights);
+  return q !== null ? q : evalPos(g2, col, weights);
 }
 /* 着法排序：吃子、压子优先，让 alpha-beta 尽早剪枝 */
 function orderActions(g, acts){
@@ -914,65 +924,158 @@ function orderActions(g, acts){
   for (i = 0; i < arr.length; i++) out.push(arr[i].a);
   return out;
 }
-/* 搜到判和时的回退分：和棋本身价值相同，但用一层很薄的位置分打破平局，
-   避免「所有着法都判和」时随机乱走，把最后的实战机会也丢掉。 */
-function drawScore(g, col){ return 1e-3 * evalPos(g, col); }
-
-/* 极小化极大：返回值始终从 col（AI 一方）的视角计分。 */
-function searchNode(g, pi, depth, col, alpha, beta, nodes){
-  nodes.n++;
-  const color = g.pcolor[pi];
-  const opp = otherColor(color);
-  const cnt = counts(g);
-  if (cnt[opp] === 0) return color === col ? WIN : -WIN;
-  if (cnt[color] === 0) return color === col ? -WIN : WIN;
-  const chaser = chaseLoss(g);
-  if (chaser) return chaser === col ? -WIN : WIN;
-  if (g.noCap >= 60 || deadPosition(g)){
-    const loser = blockadeDrawLoser(g, true);
-    if (loser) return loser === col ? -WIN : WIN;
-    return drawScore(g, col);
+function sameAction(a, b){
+  if (!a || !b || a.kind !== b.kind) return false;
+  return a.kind === "flip" ? a.i === b.i : a.from === b.from && a.to === b.to;
+}
+/* 搜索只在全盘明棋的残局调用。身份、颜色已公开；附加长捉状态和计数，
+   避免把规则上不同的节点误认为同一局面。 */
+function searchKey(g, pi){
+  const ch = g.chase;
+  const chaseKey = ch
+    ? [ch.by, ch.chaserUid, ch.targetUid, ch.rounds, ch.pending ? 1 : 0].join(":")
+    : "-";
+  return positionKey(g) + "|" + pi + "|" + (g.noCap || 0) + "|" + chaseKey;
+}
+function terminalSearchScore(g, pi, col, weights){
+  const previous = 1 - pi;
+  const score = terminalScore(g, previous);
+  if (score === null) return null;
+  if (score === 0) return drawScore(g, col, weights);
+  return g.pcolor[previous] === col ? score : -score;
+}
+/* 叶节点战术延伸：仅继续搜索会立即改变子力或终局的公开着法。
+   stand-pat 只是静态估值；深度和共用节点预算限制延伸范围。 */
+function quiescence(g, pi, col, alpha, beta, qdepth, nodes, counted){
+  if (!counted) nodes.n++;
+  if (nodes.aborted) return evalPos(g, col, nodes.weights);
+  if (!counted){
+    const terminal = terminalSearchScore(g, pi, col, nodes.weights);
+    if (terminal !== null) return terminal;
   }
-  if (depth <= 0 || nodes.n >= nodes.max) return evalPos(g, col);
-  const acts = allActions(g, pi);
-  if (!acts.length) return color === col ? -WIN : WIN;   /* 困毙 */
-  const maxing = color === col;
-  let best = maxing ? -SEARCH_INF : SEARCH_INF;
+  const stand = evalPos(g, col, nodes.weights);
+  if (qdepth <= 0) return stand;
+  if (nodes.n >= nodes.max){ nodes.aborted = true; return stand; }
+
+  const color = g.pcolor[pi], maxing = color === col;
+  if (maxing){
+    if (stand >= beta) return stand;
+    if (stand > alpha) alpha = stand;
+  } else {
+    if (stand <= alpha) return stand;
+    if (stand < beta) beta = stand;
+  }
+  const acts = allActions(g, pi).filter(a =>
+    a.kind === "capture" || a.kind === "self" || a.kind === "press" ||
+    a.kind === "thirst" || a.kind === "dive"
+  );
+  if (!acts.length) return stand;
   const ordered = orderActions(g, acts);
+  let best = stand;
   for (let i = 0; i < ordered.length; i++){
+    if (nodes.aborted) break;
     const g2 = cloneG(g);
     applyAction(g2, ordered[i]);
-    const v = searchNode(g2, 1 - pi, depth - 1, col, alpha, beta, nodes);
+    const value = quiescence(g2, 1 - pi, col, alpha, beta, qdepth - 1, nodes, false);
+    if (nodes.aborted) break;
     if (maxing){
-      if (v > best) best = v;
+      if (value > best) best = value;
       if (best > alpha) alpha = best;
     } else {
-      if (v < best) best = v;
+      if (value < best) best = value;
       if (best < beta) beta = best;
     }
     if (beta <= alpha) break;
   }
   return best;
 }
+/* 搜到判和时的回退分：和棋本身价值相同，但用一层很薄的位置分打破平局，
+   避免「所有着法都判和」时随机乱走，把最后的实战机会也丢掉。 */
+function drawScore(g, col, weights){ return 1e-3 * evalPos(g, col, weights); }
+
+/* 极小化极大：返回值始终从 col（AI 一方）的视角计分。 */
+function searchNode(g, pi, depth, col, alpha, beta, nodes){
+  nodes.n++;
+  if (nodes.aborted) return evalPos(g, col, nodes.weights);
+  const color = g.pcolor[pi];
+  /* 所有搜索节点都是刚走完一步的局面；复用正式终局判定，保证双方同灭、
+     困毙、长捉和和棋改判与对局逻辑一致。terminalScore 从上一手行棋方计分。 */
+  const terminal = terminalSearchScore(g, pi, col, nodes.weights);
+  if (terminal !== null){
+    return terminal;
+  }
+  if (depth <= 0){
+    return quiescence(g, pi, col, alpha, beta, nodes.qDepth, nodes, true);
+  }
+  if (nodes.n >= nodes.max){ nodes.aborted = true; return evalPos(g, col, nodes.weights); }
+
+  const alphaOrig = alpha, betaOrig = beta;
+  const key = searchKey(g, pi);
+  const cached = nodes.tt.get(key);
+  let preferred = null;
+  if (cached){
+    preferred = cached.move;
+    if (cached.depth >= depth){
+      if (cached.flag === "exact") return cached.score;
+      if (cached.flag === "lower" && cached.score > alpha) alpha = cached.score;
+      else if (cached.flag === "upper" && cached.score < beta) beta = cached.score;
+      if (beta <= alpha) return cached.score;
+    }
+  }
+  const acts = allActions(g, pi);
+  if (!acts.length) return color === col ? -WIN : WIN;   /* 困毙 */
+  const maxing = color === col;
+  let best = maxing ? -SEARCH_INF : SEARCH_INF, bestMove = null;
+  const ordered = orderActions(g, acts);
+  if (preferred){
+    const preferredAt = ordered.findIndex(a => sameAction(a, preferred));
+    if (preferredAt > 0) ordered.unshift(ordered.splice(preferredAt, 1)[0]);
+  }
+  for (let i = 0; i < ordered.length; i++){
+    if (nodes.aborted) break;
+    const g2 = cloneG(g);
+    applyAction(g2, ordered[i]);
+    const v = searchNode(g2, 1 - pi, depth - 1, col, alpha, beta, nodes);
+    if (nodes.aborted) break;
+    if (maxing){
+      if (v > best){ best = v; bestMove = ordered[i]; }
+      if (best > alpha) alpha = best;
+    } else {
+      if (v < best){ best = v; bestMove = ordered[i]; }
+      if (best < beta) beta = best;
+    }
+    if (beta <= alpha) break;
+  }
+  if (!nodes.aborted){
+    const flag = best <= alphaOrig ? "upper" : (best >= betaOrig ? "lower" : "exact");
+    const old = nodes.tt.get(key);
+    if (!old || depth >= old.depth) nodes.tt.set(key, { depth: depth, score: best, flag: flag, move: bestMove });
+  }
+  return best;
+}
 /* 根节点逐层加深；某一层超出节点预算就沿用上一层的完整结果。
    根节点每一手都开全窗口：共享 alpha 虽然省节点，却会把「不如当前
    最优」的着法截断成与最优相同的分数，平局随机时就会选中差着。 */
-function rootSearch(g, pi, maxDepth, budget){
+function rootSearch(g, pi, maxDepth, budget, weights){
   const col = g.pcolor[pi];
   let acts = allActions(g, pi);
   let best = null;
+  const tt = new Map();
+  const pieces = pieceCount(g);
+  const qDepth = pieces <= 8 ? QUIESCENCE_ENDGAME_DEPTH : QUIESCENCE_MIDGAME_DEPTH;
   for (let d = 1; d <= maxDepth; d++){
-    const nodes = { n: 0, max: budget };
+    const nodes = { n: 0, max: budget, aborted: false, tt: tt, qDepth: qDepth, weights: weights };
     const cur = [];
     let complete = true, i, a, g2, sc;
     for (i = 0; i < acts.length; i++){
       a = acts[i];
       if (a.kind === "flip"){ complete = false; break; }
+      if (nodes.n >= budget){ nodes.aborted = true; complete = false; break; }
       g2 = cloneG(g);
       applyAction(g2, a);
       sc = searchNode(g2, 1 - pi, d - 1, col, -SEARCH_INF, SEARCH_INF, nodes);
+      if (nodes.aborted){ complete = false; break; }
       cur.push({ a: a, sc: sc });
-      if (nodes.n >= budget && i < acts.length - 1){ complete = false; break; }
     }
     if (!complete) break;
     best = cur;
@@ -991,7 +1094,7 @@ function rootSearch(g, pi, maxDepth, budget){
    暗子池做期望估值——假设翻出身份 q，AI 就执 q 的颜色，从该颜色的
    视角估分，再按等概率平均。岸旁的落点因此会得到「下一手踏岸」的
    先机权重。全程不读取暗格的真实身份。 */
-function pickOpeningFlip(g, acts){
+function pickOpeningFlip(g, acts, weights){
   const pool = hiddenPool(g), scored = [];
   let i, k, cell, sum, g2, p, q;
   if (!pool || !pool.length) return pickOpeningFallback(acts);
@@ -1003,7 +1106,7 @@ function pickOpeningFlip(g, acts){
       g2 = cloneG(g);
       p = g2.board[cell];
       p.c = q.c; p.t = q.t; p.rv = true;
-      sum += evalPos(g2, q.c);
+      sum += evalPos(g2, q.c, weights);
     }
     scored.push({ a: acts[i], sc: sum / pool.length });
   }
@@ -1028,15 +1131,17 @@ function pickOpeningFallback(acts){
      depth         搜索深度上限（默认按棋子数取 3 或 2；1 表示只做一步评估）
      budget        搜索节点预算（默认 NODE_BUDGET）
      history       最近对局的公开局面键数组（重复局面惩罚，可含当前局面）
+     weights       覆盖 DEFAULT_WEIGHTS 中的估值参数
      deterministic true 时不做随机取样，稳定返回最优着 */
 export function aiPick(g, pi, opts){
   if (!g || !g.pcolor) return null;
+  opts = opts || {};
+  const weights = Object.assign({}, DEFAULT_WEIGHTS, opts.weights || {});
   const col = g.pcolor[pi];
   const acts = allActions(g, pi);
   if (!acts.length) return null;
-  if (!col) return pickOpeningFlip(g, acts);
+  if (!col) return pickOpeningFlip(g, acts, weights);
 
-  opts = opts || {};
   const budget = opts.budget || NODE_BUDGET;
   const maxDepth = opts.depth || (pieceCount(g) <= 8 ? (g.noCap >= 25 ? 4 : 3) : 2);
   const pool = hiddenPool(g);
@@ -1067,11 +1172,11 @@ export function aiPick(g, pi, opts){
   }
   if (instant.length) return instant[Math.random() * instant.length | 0];
 
-  /* 全盘翻开后的中残局做浅层搜索，把「准备着法」的后续收益算进来。
+/* 全盘翻开后的中残局做浅层搜索，把「准备着法」的后续收益算进来。
      只要还有暗子，就退回一步期望估值——搜索树里不能偷看暗子身份。 */
   let searched = null;
   if (!hasHidden(g) && pieceCount(g) <= SEARCH_MAX_PIECES && maxDepth >= 2){
-    searched = rootSearch(g, pi, maxDepth, budget);
+    searched = rootSearch(g, pi, maxDepth, budget, weights);
   }
 
   if (searched){
@@ -1082,11 +1187,11 @@ export function aiPick(g, pi, opts){
       if (act.kind === "flip"){
         /* 无法重建暗子池（非标准摆局）时按「局面不变」计价。绝不能给一个
            固定的小正数：局面估值常常是几百的负数，那会让 AI 永远翻棋。 */
-        sc = pool && pool.length ? expectedFlip(g, pi, act.i, pool)
-                                 : evalPos(g, col);
+        sc = pool && pool.length ? expectedFlip(g, pi, act.i, pool, weights)
+                                 : evalPos(g, col, weights);
         sc += flipUrgency + Math.random() * 0.3;
       } else {
-        sc = onePlyScore(g, pi, act, col);
+        sc = onePlyScore(g, pi, act, col, weights);
         sc += Math.random() * 0.05;
       }
       scored.push({ a: act, sc: sc });
