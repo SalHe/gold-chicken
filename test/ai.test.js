@@ -190,7 +190,7 @@ describe("龙、金鸡与河界", () => {
   it("AI 会把被金鸡盯上的龙挪进河里", () => {
     const g = mk([[xy2i(2, 3), DRAGON]], [[xy2i(4, 7), ROOSTER]]);
     /* 两个河格都安全；龙还可以斜着下河，落哪一格由估值决定 */
-    expect(rules.isRiver(ai.aiPick(g, 0).to)).toBe(true);
+    expect(rules.isRiver(ai.aiPick(g, 0, { deterministic: true }).to)).toBe(true);
   });
 
   it("堵岸把敌方金鸡挡在河界另一侧时，己方龙更安全", () => {
